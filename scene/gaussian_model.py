@@ -23,6 +23,9 @@ from utils.graphics_utils import BasicPointCloud
 from utils.general_utils import strip_symmetric, build_scaling_rotation
 from scene.deformation import deform_network
 from scene.regulation import compute_plane_smoothness
+from meshnet.data_utils import compute_edges_index
+from meshnet.viz import plot_mesh
+import pdb
 class GaussianModel:
 
     def setup_functions(self):
@@ -63,6 +66,8 @@ class GaussianModel:
         self.spatial_lr_scale = 0
         self._deformation_table = torch.empty(0)
         self.setup_functions()
+
+        self.edge_index = None
 
     def capture(self):
         return (
@@ -129,6 +134,15 @@ class GaussianModel:
     def get_covariance(self, scaling_modifier = 1):
         return self.covariance_activation(self.get_scaling, scaling_modifier, self._rotation)
 
+    def process_mesh_indeces(self, mesh_points):
+        # TODO: check that this is the same format needed for the rasterizer
+        print("Processing mesh indeces")
+        pdb.set_trace()
+        self.edge_index = compute_edges_index(mesh_points, delaunay=True)
+        # Function to visualize the mesh givent the processed edge points for debugging purposes
+        # plot_mesh(mesh_points, edge_index.T)
+
+
     def oneupSHdegree(self):
         if self.active_sh_degree < self.max_sh_degree:
             self.active_sh_degree += 1
@@ -159,6 +173,8 @@ class GaussianModel:
         self._opacity = nn.Parameter(opacities.requires_grad_(True))
         self.max_radii2D = torch.zeros((self.get_xyz.shape[0]), device="cuda")
         self._deformation_table = torch.gt(torch.ones((self.get_xyz.shape[0]),device="cuda"),0)
+
+        self.process_mesh_indeces(self.get_xyz)
     def training_setup(self, training_args):
         self.percent_dense = training_args.percent_dense
         self.xyz_gradient_accum = torch.zeros((self.get_xyz.shape[0], 1), device="cuda")
@@ -311,6 +327,8 @@ class GaussianModel:
         self._scaling = nn.Parameter(torch.tensor(scales, dtype=torch.float, device="cuda").requires_grad_(True))
         self._rotation = nn.Parameter(torch.tensor(rots, dtype=torch.float, device="cuda").requires_grad_(True))
         self.active_sh_degree = self.max_sh_degree
+
+        self.process_mesh_indeces(self.get_xyz)
 
     def replace_tensor_to_optimizer(self, tensor, name):
         optimizable_tensors = {}
@@ -468,6 +486,8 @@ class GaussianModel:
             prune_mask = torch.logical_or(torch.logical_or(prune_mask, big_points_vs), big_points_ws)
         self.prune_points(prune_mask)
 
+        self.process_mesh_indeces(self.get_xyz)
+
         torch.cuda.empty_cache()
     def densify(self, max_grad, min_opacity, extent, max_screen_size):
         grads = self.xyz_gradient_accum / self.denom
@@ -475,6 +495,8 @@ class GaussianModel:
 
         self.densify_and_clone(grads, max_grad, extent)
         self.densify_and_split(grads, max_grad, extent)
+
+        self.process_mesh_indeces(self.get_xyz)
     def standard_constaint(self):
         
         means3D = self._xyz.detach()

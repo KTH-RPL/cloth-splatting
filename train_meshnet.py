@@ -341,7 +341,7 @@ if __name__=='__main__':
 
 
     flags.DEFINE_integer('batch_size', 16, help='The batch size.')
-    flags.DEFINE_string('data_path', 'data/dataset/final_scenes/scene_1', help='The dataset directory.')
+    flags.DEFINE_string('data_path', 'data/final_scenes/scene_1', help='The dataset directory.')
     flags.DEFINE_string('data_name', 'final_scene_1_gt_eval', help='Name of the dataset file.')
     flags.DEFINE_string('model_path', "data/model_pos_checkpoint/", help=('The path for saving checkpoints of the model.'))
     flags.DEFINE_string('output_path', "data/rollouts_pos/", help='The path for saving outputs (e.g. rollouts).')
@@ -366,7 +366,7 @@ if __name__=='__main__':
     flags.DEFINE_integer('loss_report_step', int(1), help='Number of steps at which to report the loss.')
 
     # Data Processing
-    flags.DEFINE_integer('knn', int(10), help='Number of neightbor to construct the graph.')
+    flags.DEFINE_integer('knn', int(10), help='Number of neighbor to construct the graph.')
     flags.DEFINE_integer('delaunay', int(1), help='Whether to use delaunay to traingulation or not.')
     flags.DEFINE_integer('subsample', int(1), help='Whether to subsample or not the initial set of points.')
     flags.DEFINE_integer('num_samples', int(300), help='Number of points to subsample.')
