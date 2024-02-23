@@ -137,11 +137,12 @@ class GaussianModel:
     def process_mesh_indeces(self, mesh_points):
         # TODO: check that this is the same format needed for the rasterizer
         # TODO: is the cloning a problem
-        print("Processing mesh indeces")
+        # print("Processing mesh indeces")
         # pdb.set_trace()
         self.edge_index = compute_edges_index(mesh_points.clone().detach().cpu(), delaunay=True)
 
         # Function to visualize the mesh givent the processed edge points for debugging purposes
+        # plot_mesh(mesh_points.clone().detach().cpu(), self.edge_index.T)
         # plot_mesh(mesh_points.clone().detach().cpu(), self.edge_index.T, save_fig=True, file_name='mesh.png')
 
 
@@ -177,6 +178,7 @@ class GaussianModel:
         self._deformation_table = torch.gt(torch.ones((self.get_xyz.shape[0]),device="cuda"),0)
 
         self.process_mesh_indeces(self.get_xyz)
+
     def training_setup(self, training_args):
         self.percent_dense = training_args.percent_dense
         self.xyz_gradient_accum = torch.zeros((self.get_xyz.shape[0], 1), device="cuda")

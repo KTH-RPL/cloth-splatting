@@ -1,8 +1,9 @@
 import torch
 import torch.nn as nn
 import numpy as np
-import meshnet.graph_network as graph_network
-from meshnet.model_utils import Normalizer
+
+
+from model_utils import Normalizer
 
 
 class MeshSimulator(nn.Module):
