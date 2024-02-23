@@ -3,7 +3,7 @@ export CUDA_VISIBLE_DEVICES=0&&python train.py -s data/hypernerf/virg/broom2 --p
 export CUDA_VISIBLE_DEVICES=1&&python train.py -s data/hypernerf/virg/vrig-3dprinter --port 6066 --expname "$exp_name/3dprinter" --configs arguments/$exp_name/default.py &
 export CUDA_VISIBLE_DEVICES=2&&python train.py -s data/hypernerf/virg/peel-banana --port 6069 --expname "$exp_name/peel-banana" --configs arguments/$exp_name/default.py  &
 export CUDA_VISIBLE_DEVICES=3&&python train.py -s data/hypernerf/virg/vrig-chicken --port 6070 --expname "$exp_name/vrig-chicken" --configs arguments/$exp_name/default.py &
-# export CUDA_VISIBLE_DEVICES=3&&python train.py -s data/hypernerf/interp/hand1-dense-v2 --port 6071 --expname "$exp_name/hand1-dense-v2" --configs arguments/$exp_name/hand1-dense-v2.py 
+# export CUDA_VISIBLE_DEVICES=3&&python train_meshnet.py -s data/hypernerf/interp/hand1-dense-v2 --port 6071 --expname "$exp_name/hand1-dense-v2" --configs arguments/$exp_name/hand1-dense-v2.py
 wait
 export CUDA_VISIBLE_DEVICES=0&&python render.py --model_path output/$exp_name/broom2 --configs arguments/$exp_name/default.py --skip_train &
 export CUDA_VISIBLE_DEVICES=1&&python render.py --model_path output/$exp_name/3dprinter  --configs arguments/$exp_name/default.py --skip_train &

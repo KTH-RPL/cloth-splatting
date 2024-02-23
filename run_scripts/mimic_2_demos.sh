@@ -5,7 +5,7 @@ export isometry=0.316227766
 
 port=6027 
 
-# python3 train.py -s "data/mimic/mimic_1" --port $port --expname "mimic/mimic_1" --configs arguments/mdnerf-dataset/cube.py --lambda_w 100000 \
+# python3 train_meshnet.py -s "data/mimic/mimic_1" --port $port --expname "mimic/mimic_1" --configs arguments/mdnerf-dataset/cube.py --lambda_w 100000 \
 # --lambda_rigidity $RIGIDITY_LAMBDA --lambda_spring $LAMBDA_SPRING  --lambda_momentum 0.1 \
 # --k_nearest 5 --lambda_isometric $isometry --time_skip 4 \
 # --use_wandb --wandb_project "mimic_1" --wandb_name "First_try" \
