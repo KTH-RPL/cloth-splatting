@@ -136,11 +136,13 @@ class GaussianModel:
 
     def process_mesh_indeces(self, mesh_points):
         # TODO: check that this is the same format needed for the rasterizer
+        # TODO: is the cloning a problem
         print("Processing mesh indeces")
-        pdb.set_trace()
-        self.edge_index = compute_edges_index(mesh_points, delaunay=True)
+        # pdb.set_trace()
+        self.edge_index = compute_edges_index(mesh_points.clone().detach().cpu(), delaunay=True)
+
         # Function to visualize the mesh givent the processed edge points for debugging purposes
-        # plot_mesh(mesh_points, edge_index.T)
+        # plot_mesh(mesh_points.clone().detach().cpu(), self.edge_index.T, save_fig=True, file_name='mesh.png')
 
 
     def oneupSHdegree(self):
