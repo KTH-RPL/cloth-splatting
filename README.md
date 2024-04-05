@@ -15,24 +15,33 @@
 
 **Docker Image**
 
-We use docker to run our code, you will need to install docker and [nvidia-docker](https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/latest/install-guide.html). You can build the docker image by running the following command:
+We use `python3.10` and `cuda 12.1` for our experiments.
+In case you want to set up a custom environment, you can use the following commands to create a new conda environment and install the required cuda version.
 ```
-docker build -f md_splatting.dockerfile -t md_splatting .
+conda create -n cloth-splatting python=3.10
+conda activate cloth-splatting
+conda install install cuda -c nvidia/label/cuda-12.1.0
 ```
+For the torch dependencies we use `torch 2.2.0`.
+```
+pip install torch==2.2.0 torchvision --index-url https://download.pytorch.org/whl/cu121
+```
+For the installation of the `torch_geometric` dependencies, for more information refer to the [official installation guide](https://pytorch-geometric.readthedocs.io/en/latest/notes/installation.html).
 
-If you don't want to build the docker image, you can pull a pre-built image from docker hub:
 ```
-docker pull bartduis/md_splatting:latest
+pip install torch_geometric
+pip install pyg_lib torch_scatter torch_sparse torch_cluster torch_spline_conv -f https://data.pyg.org/whl/torch-2.2.0+cu121.html
 ```
-
-Now create a container from the image and run it.
+For the remaining pip dependencies, you can install them using the requirements.txt file.
+```
+pip install -r requirements.txt
+```
+For the submodules, you can install them using the following commands.
 ``` 
-docker run -it --gpus all --network=host --shm-size=2G  --name md_splatting -v /home/username:/workspace md_splatting
-cd /workspace 
+git submodule update --init --recursive
 pip install -e submodules/depth-diff-gaussian-rasterization
 pip install -e submodules/simple-knn
 ```
-At this point your container is ready to run the code.
 
 
 ## Data
