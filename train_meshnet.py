@@ -48,7 +48,7 @@ def predict(simulator, device, FLAGS):
     with torch.no_grad():
         for i, features in enumerate(ds):
             nsteps = len(features[0]) - input_sequence_length
-            prediction_data = rollout(simulator, features, nsteps, device, FLAGS)
+            prediction_data = rollout(simulator, features, nsteps, device, FLAGS.input_sequence_length, FLAGS.dt)
             print(f"Rollout for example{i}: loss = {prediction_data['mean_loss']}")
 
             # Save rollout in testing
@@ -60,9 +60,7 @@ def predict(simulator, device, FLAGS):
 
     print(f"Mean loss on rollout prediction: {prediction_data['mean_loss']}")
 
-def rollout(simulator,  features, nsteps, device, FLAGS):
-    input_sequence_length = FLAGS.input_sequence_length
-    dt = FLAGS.dt
+def rollout(simulator,  features, nsteps, device, input_sequence_length, dt):
 
     # TODO: adjust this
     node_coords = features[0]  # (timesteps, nnode, ndims)
@@ -241,7 +239,7 @@ def train(simulator, device, FLAGS):
 
                 # Get inputs
                 node_types = graph.x[:, 0]
-                time_vector = graph.x[:, 1]
+                time_vector = graph.x[:, 1].unsqueeze(1)
                 init_position = graph.pos
                 edge_index = graph.edge_index
                 edge_features = graph.edge_attr
