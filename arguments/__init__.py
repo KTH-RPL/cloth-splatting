@@ -13,10 +13,13 @@ from argparse import ArgumentParser, Namespace
 import sys
 import os
 
+
 class GroupParams:
     pass
 
+
 class ParamGroup:
+
     def __init__(self, parser: ArgumentParser, name : str, fill_none = False):
         group = parser.add_argument_group(name)
         for key, value in vars(self).items():
@@ -44,6 +47,7 @@ class ParamGroup:
                 setattr(group, arg[0], arg[1])
         return group
 
+
 class ModelParams(ParamGroup): 
     def __init__(self, parser, sentinel=False):
         self.sh_degree = 3
@@ -62,13 +66,17 @@ class ModelParams(ParamGroup):
         g.source_path = os.path.abspath(g.source_path)
         return g
 
+
 class PipelineParams(ParamGroup):
     def __init__(self, parser):
         self.convert_SHs_python = False
         self.compute_cov3D_python = False
         self.debug = False
         super().__init__(parser, "Pipeline Parameters")
+
+
 class ModelHiddenParams(ParamGroup):
+
     def __init__(self, parser):
         self.net_width = 64
         self.timebase_pe = 4
@@ -96,7 +104,8 @@ class ModelHiddenParams(ParamGroup):
 
         
         super().__init__(parser, "ModelHiddenParams")
-        
+
+
 class OptimizationParams(ParamGroup):
     def __init__(self, parser):
         self.dataloader=False
@@ -134,8 +143,44 @@ class OptimizationParams(ParamGroup):
         self.opacity_threshold_coarse = 0.005
         self.opacity_threshold_fine_init = 0.005
         self.opacity_threshold_fine_after = 0.005
-        
+
+        self.initial_gaussians = 2000
+        self.no_coarse = False
+
         super().__init__(parser, "Optimization Parameters")
+
+
+class MeshnetParams(ParamGroup):
+
+    def __init__(self, parser):
+
+        self.meshnet_path = ''
+        self.meshnet_file = 'latest'
+
+        # Model parameters and training details
+        self.nmessage_passing_steps = 15
+        self.noise_std = 0
+        self.dt = 1
+
+        self.lr_init = 3e-4
+        self.lr_decay_rate = 0.1
+        self.lr_decay_steps = 5e6
+
+        self.latent_dim = 128
+        self.nmlp_layers = 2
+        self.mlp_hidden_dim = 128
+
+
+        # Data Processing
+        self.knn = 10
+        self.delaunay = 1
+        self.subsample = 1
+        self.num_samples = 300
+
+        super().__init__(parser, "Meshnet Parameters")
+
+
+
 
 def get_combined_args(parser : ArgumentParser):
     cmdlne_string = sys.argv[1:]
