@@ -20,8 +20,9 @@ from gaussian_renderer import render
 import torchvision
 from utils.general_utils import safe_state
 from argparse import ArgumentParser
-from arguments import ModelParams, PipelineParams, get_combined_args, ModelHiddenParams
-from gaussian_renderer import GaussianModel
+from arguments import ModelParams, PipelineParams, get_combined_args, ModelHiddenParams, MeshnetParams
+from meshnet.gaussian_mesh import GaussianMesh
+from meshnet.meshnet import MeshSimulator
 from time import time
 import glob 
 import matplotlib.pyplot as plt
@@ -30,6 +31,7 @@ from colormap import colormap
 
 tonumpy = lambda x : x.cpu().numpy()
 to8 = lambda x : np.uint8(np.clip(x,0,1)*255)
+
 
 def merge_deform_logs(folder):
     npz_files = glob.glob(os.path.join(folder,'log_deform_*.npz'),recursive=True)
@@ -51,10 +53,10 @@ def merge_deform_logs(folder):
     np.savez(os.path.join(folder,'all_trajs.npz'),traj=trajs,rotations=rotations)
     print("saved all trajs to {}".format(os.path.join(folder,'all_trajs.npz')))
     print("shape of all trajs: {}".format(trajs.shape))
-    
 
 
-def render_set(model_path, name, iteration, views, gaussians, pipeline, background,log_deform=False,args=None):
+def render_set(model_path, name, iteration, views, gaussians: GaussianMesh, simulator: MeshSimulator,
+               pipeline, background,log_deform=False,args=None):
     render_path = os.path.join(model_path, name, "ours_{}".format(iteration), "renders")
     gts_path = os.path.join(model_path, name, "ours_{}".format(iteration), "gt")
 
@@ -84,7 +86,6 @@ def render_set(model_path, name, iteration, views, gaussians, pipeline, backgrou
     arrow_tickness = 2
     raddii_threshold = 0
 
-
     for idx, view in enumerate(tqdm(views, desc="Rendering progress")):
         if idx == 0:time1 = time()
         log_deform_path = None
@@ -100,7 +101,8 @@ def render_set(model_path, name, iteration, views, gaussians, pipeline, backgrou
             # remove time from todo_times
             todo_times = todo_times[todo_times != view_time]
         
-        render_pkg = render(view, gaussians, pipeline, background,log_deform_path=log_deform_path,no_shadow=args.no_shadow)
+        render_pkg = render(view, gaussians, simulator,
+                            pipeline, background, log_deform_path=log_deform_path, no_shadow=args.no_shadow)
         rendering = tonumpy(render_pkg["render"]).transpose(1,2,0)
 
         if args.show_flow:
@@ -141,10 +143,8 @@ def render_set(model_path, name, iteration, views, gaussians, pipeline, backgrou
                 prev_visible = current_visible
             
             view_id = view.view_id
-            
-        
+
         render_list.append(rendering)
-            
 
         if name in ["train", "test"]:
             gt = view.original_image[0:3, :, :]
@@ -153,7 +153,6 @@ def render_set(model_path, name, iteration, views, gaussians, pipeline, backgrou
 
     video_imgs = [to8(img) for img in render_list]
     save_imgs = [torch.tensor((img.transpose(2,0,1)),device="cpu") for img in render_list ]
-
 
     time2=time()
     print("FPS:",(len(views)-1)/(time2-time1))
@@ -171,24 +170,48 @@ def render_set(model_path, name, iteration, views, gaussians, pipeline, backgrou
             count +=1
     
     imageio.mimwrite(os.path.join(model_path, name, "ours_{}".format(iteration), 'video_rgb.mp4'), video_imgs, fps=30, quality=8)
-def render_sets(dataset : ModelParams, hyperparam, iteration : int, pipeline : PipelineParams, skip_train : bool, skip_test : bool, skip_video: bool,log_deform=False,user_args=None):
+
+
+def render_sets(dataset: ModelParams, hyperparam, iteration: int, pipeline: PipelineParams, meshnet_params: MeshnetParams,
+                skip_train: bool, skip_test: bool, skip_video: bool,log_deform=False, user_args=None):
     with torch.no_grad():
-        gaussians = GaussianModel(dataset.sh_degree, hyperparam)
+        gaussians = GaussianMesh(dataset.sh_degree)
         scene = Scene(dataset, gaussians, load_iteration=iteration, shuffle=False,user_args=user_args)
+
+        # load simulator
+        simulator = MeshSimulator(
+            latent_dim=meshnet_params.latent_dim,
+            nmessage_passing_steps=meshnet_params.nmessage_passing_steps,
+            nmlp_layers=meshnet_params.nmlp_layers,
+            mlp_hidden_dim=meshnet_params.mlp_hidden_dim,
+            nnode_in=5,  # node (1) type, position (3) and time (1)
+            nedge_in=4,  # relative positions of node i,j (3) edge norm (1)
+            simulation_dimensions=3,
+            nnode_types=1,  # number of different particle types
+            node_type_embedding_size=1,  # this is one hot encoding for the type, so it is 1 as far as we have 1 type
+            device='cuda')
+
+        dataset.model_path = args.model_path
+
+        if meshnet_params.meshnet_path != "":
+            simulator.load(meshnet_params.meshnet_path, meshnet_params.meshnet_file)
 
         bg_color = [1,1,1] if dataset.white_background else [0, 0, 0]
         background = torch.tensor(bg_color, dtype=torch.float32, device="cuda")
 
         if not skip_train:
-            render_set(dataset.model_path, "train", scene.loaded_iter, scene.getTrainCameras(), gaussians, pipeline, background,log_deform=log_deform,args=user_args)
+            render_set(dataset.model_path, "train", scene.loaded_iter, scene.getTrainCameras(),
+                       gaussians, simulator, pipeline, background, log_deform=log_deform,args=user_args)
         if not skip_test:
             log_folder = os.path.join(args.model_path, "test", "ours_{}".format(scene.loaded_iter))
             delete_previous_deform_logs(log_folder)
-            render_set(dataset.model_path, "test", scene.loaded_iter, scene.getTestCameras(), gaussians, pipeline, background,log_deform=log_deform,args=user_args) 
+            render_set(dataset.model_path, "test", scene.loaded_iter, scene.getTestCameras(),
+                       gaussians, simulator, pipeline, background, log_deform=log_deform,args=user_args)
             if user_args.log_deform:
                 merge_deform_logs(log_folder)           
         if not skip_video:
-            render_set(dataset.model_path,"video",scene.loaded_iter,scene.getVideoCameras(),gaussians,pipeline,background,log_deform=log_deform,args=user_args)
+            render_set(dataset.model_path,"video",scene.loaded_iter,scene.getVideoCameras(),
+                       gaussians, simulator, pipeline,background, log_deform=log_deform,args=user_args)
  
 def delete_previous_deform_logs(folder):
     npz_files = glob.glob(os.path.join(folder,'log_deform_*.npz'),recursive=True)
@@ -201,6 +224,7 @@ if __name__ == "__main__":
     model = ModelParams(parser, sentinel=True)
     pipeline = PipelineParams(parser)
     hyperparam = ModelHiddenParams(parser)
+    meshnet_param = MeshnetParams(parser)
     parser.add_argument("--iteration", default=-1, type=int)
     parser.add_argument("--skip_train", action="store_true")
     parser.add_argument("--skip_test", action="store_true")
@@ -225,5 +249,6 @@ if __name__ == "__main__":
     # Initialize system state (RNG)
     safe_state(args.quiet)
 
-    render_sets(model.extract(args), hyperparam.extract(args), args.iteration, pipeline.extract(args), args.skip_train, args.skip_test, args.skip_video,log_deform=args.log_deform,user_args=args)
+    render_sets(model.extract(args), hyperparam.extract(args), args.iteration, pipeline.extract(args),
+                meshnet_param.extract(args), args.skip_train, args.skip_test, args.skip_video,log_deform=args.log_deform,user_args=args)
     

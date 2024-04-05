@@ -1,12 +1,16 @@
 import torch
 import torch.nn as nn
 import numpy as np
+import glob
+import re
+import os
 
-
-from model_utils import Normalizer
+from meshnet.model_utils import Normalizer
+from meshnet.graph_network import EncodeProcessDecode
 
 
 class MeshSimulator(nn.Module):
+
     def __init__(
             self,
             simulation_dimensions: int,
@@ -39,14 +43,14 @@ class MeshSimulator(nn.Module):
         self._node_type_embedding_size = node_type_embedding_size
 
         # Initialize the EncodeProcessDecode
-        self._encode_process_decode = graph_network.EncodeProcessDecode(
+        self._encode_process_decode = EncodeProcessDecode(
             nnode_in_features=nnode_in,  # 3 current velocities + 1 node_type + 1 TIME  (node_type dimensions corresponds to the number of node types, potentially include time)
             nnode_out_features=simulation_dimensions,  # 3
             nedge_in_features=nedge_in,  # 3 relative disp + 1 norm
             latent_dim=latent_dim,
             nmessage_passing_steps=nmessage_passing_steps,
             nmlp_layers=nmlp_layers,
-            mlp_hidden_dim=mlp_hidden_dim)
+            mlp_hidden_dim=mlp_hidden_dim).to(device)
 
         self._output_normalizer = Normalizer(
             size=simulation_dimensions, name='output_normalizer', device=device)
@@ -58,12 +62,11 @@ class MeshSimulator(nn.Module):
         """Forward hook runs on class instantiation"""
         pass
 
-
     def _encoder_preprocessor(self,
                               init_position: torch.tensor,
                               time_vector: torch.tensor,
                               node_type: torch.tensor,
-                              position_noise: torch.tensor):
+                              position_noise: torch.tensor = None):
         """
         Take `current_velocity` (nnodes, dims) and node type (nnodes, 1),
         impose `velocity_noise`, convert integer `node_type` to onehot embedding `node_type`,
@@ -90,7 +93,7 @@ class MeshSimulator(nn.Module):
             pass
 
         # embed time
-        node_features.append(time_vector.unsqueeze(1))
+        node_features.append(time_vector)
 
         # embed integer node_type to onehot vector
         node_type = torch.squeeze(node_type.long())
@@ -109,8 +112,8 @@ class MeshSimulator(nn.Module):
             node_type,
             edge_index,
             edge_features,
-            target_positions,
-            position_noise):
+            target_positions=None,
+            position_noise=None):
         """
         Predict acceleration using current features
 
@@ -136,6 +139,9 @@ class MeshSimulator(nn.Module):
         # predict acceleration
         predicted_normalized_displacements = self._encode_process_decode(
             processed_node_features.to(torch.float32), edge_index, edge_features)
+
+        if target_positions is None:
+            return predicted_normalized_displacements, None
 
         # target acceleration
         noised_positions = init_position + position_noise
@@ -170,7 +176,6 @@ class MeshSimulator(nn.Module):
             node_type,
             position_noise=None)
 
-
         # predict dynamics
         predicted_normalized_displacements = self._encode_process_decode(
             processed_node_features, edge_index, edge_features)
@@ -182,6 +187,14 @@ class MeshSimulator(nn.Module):
         return predicted_positions
 
     def save(self, path=None):
+        """
+
+        Args:
+            path: The model save path, default should be 'model-<STEP>.pt'
+
+        Returns:
+
+        """
 
         model = self.state_dict()
         _output_normalizer = self._output_normalizer.get_variable()
@@ -193,14 +206,34 @@ class MeshSimulator(nn.Module):
 
         torch.save(save_data, path)
 
-    def load(self, path: str):
+    def load(self, path: str, file='latest'):
         """
         Load model state from file
 
         Args:
           path: Model path
+          file: The filename, if 'latest' will look for model-<STEP>.pt with the highest <STEP> number
         """
-        dicts = torch.load(path)
+
+        # TODO Make intermediate training state loadable
+
+        if file == "latest":
+            # find the latest model, assumes model and train_state files are in step.
+            fnames = glob.glob(os.path.join(path, '*model*pt'))
+            if len(fnames) == 0:
+                raise ValueError(f"Did not find any pre-trained weights for the meshnet in: {path}")
+            max_model_number = 0
+            expr = re.compile('.*model-(\d+).pt')
+            for fname in fnames:
+                model_num = int(expr.search(fname).groups()[0])
+                if model_num > max_model_number:
+                    max_model_number = model_num
+            # reset names to point to the latest.
+            model_file = os.path.join(path, f'model-{max_model_number}.pt')
+        else:
+            model_file = os.path.join(path, file)
+
+        dicts = torch.load(model_file)
         self.load_state_dict(dicts["model"])
 
         keys = list(dicts.keys())
@@ -212,5 +245,5 @@ class MeshSimulator(nn.Module):
                 object = eval('self.'+k)
                 setattr(object, para, value)
 
-        print("Simulator model loaded checkpoint %s"%path)
+        print("Simulator model loaded checkpoint %s"%model_file)
 

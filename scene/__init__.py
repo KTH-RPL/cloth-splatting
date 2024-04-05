@@ -14,7 +14,7 @@ import random
 import json
 from utils.system_utils import searchForMaxIteration
 from scene.dataset_readers import sceneLoadTypeCallbacks
-from scene.gaussian_model import GaussianModel
+from meshnet.gaussian_mesh import GaussianMesh
 from scene.dataset import FourDGSdataset, MDNerfDataset
 from arguments import ModelParams
 from utils.camera_utils import cameraList_from_camInfos, camera_to_JSON
@@ -22,9 +22,9 @@ from torch.utils.data import Dataset
 
 class Scene:
 
-    gaussians : GaussianModel
+    gaussians : GaussianMesh
 
-    def __init__(self, args : ModelParams, gaussians : GaussianModel, load_iteration=None, shuffle=True, resolution_scales=[1.0], load_coarse=False,user_args=None):
+    def __init__(self, args : ModelParams, gaussians : GaussianMesh, load_iteration=None, shuffle=True, resolution_scales=[1.0], load_coarse=False,user_args=None):
         """b
         :param path: Path to colmap scene main folder.
         """
@@ -111,16 +111,13 @@ class Scene:
         self.video_camera = cameraList_from_camInfos(scene_info.video_cameras,-1,args)
         xyz_max = scene_info.point_cloud.points.max(axis=0)
         xyz_min = scene_info.point_cloud.points.min(axis=0)
-        self.gaussians._deformation.deformation_net.grid.set_aabb(xyz_max,xyz_min)
+        # self.gaussians._deformation.deformation_net.grid.set_aabb(xyz_max,xyz_min) TODO Decide if we need an AABB
+
         if self.loaded_iter:
             self.gaussians.load_ply(os.path.join(self.model_path,
                                                            "point_cloud",
                                                            "iteration_" + str(self.loaded_iter),
                                                            "point_cloud.ply"))
-            self.gaussians.load_model(os.path.join(self.model_path,
-                                                    "point_cloud",
-                                                    "iteration_" + str(self.loaded_iter),
-                                                   ))
         # elif load_coarse:
         #     self.gaussians.load_ply(os.path.join(self.model_path,
         #                                                    "point_cloud",
@@ -132,7 +129,7 @@ class Scene:
         #                                            ))
         #     print("load coarse stage gaussians")
         else:
-            self.gaussians.create_from_pcd(scene_info.point_cloud, self.cameras_extent, self.maxtime)
+            self.gaussians.create_from_pcd(scene_info.point_cloud, self.cameras_extent)
 
     def save(self, iteration, stage):
         if stage == "coarse":
@@ -141,7 +138,7 @@ class Scene:
         else:
             point_cloud_path = os.path.join(self.model_path, "point_cloud/iteration_{}".format(iteration))
         self.gaussians.save_ply(os.path.join(point_cloud_path, "point_cloud.ply"))
-        self.gaussians.save_deformation(point_cloud_path)
+        # self.gaussians.save_deformation(point_cloud_path) # TODO Figure out what this does
     def getTrainCameras(self, scale=1.0):
         return self.train_camera
 
