@@ -24,7 +24,6 @@ from meshnet.data_utils import compute_edges_index, compute_edge_features
 from meshnet.model_utils import NodeType
 
 # TODO Add deformation table to GNN
-# TODO Make GNN loadable and savable (capture and restore)
 # TODO Add regularisation terms for GNN
 # TODO Figure out standard constraint function
 # TODO Add lr scheduler for GNN
@@ -73,13 +72,14 @@ class GaussianMesh:
         self.edge_displacement = torch.empty(0)
         self.edge_norm = torch.empty(0)
 
+    @torch.no_grad()
     def make_mesh(self):
         """
         Create the mesh from the gaussians.
         """
 
         # TODO Make method work fully on GPU
-        self.edge_index = compute_edges_index(self.get_xyz.clone().detach().cpu(), delaunay=True).to('cuda')
+        self.edge_index = compute_edges_index(self.get_xyz)
         self.node_type = torch.full(self.get_xyz.shape[0:1], fill_value=NodeType.CLOTH, device="cuda")
 
         edge_displacement, edge_norm = compute_edge_features(self._xyz.clone().detach(),

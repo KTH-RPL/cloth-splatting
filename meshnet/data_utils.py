@@ -3,7 +3,8 @@ import json
 import os
 import torch
 import matplotlib.pyplot as plt
-from scipy.spatial import cKDTree, Delaunay
+import torch_geometric
+from torch_geometric.transforms import KNNGraph
 from meshnet.viz import plot_mesh, plot_pcd_list, create_gif
 
 # function to load json data
@@ -51,7 +52,7 @@ def process_traj(traj, dt, k=3, delaunay=False, subsample=False, num_samples=300
     else:
         sampled_points_indeces = np.arange(traj[0].shape[0])
 
-    edge_index = compute_edges_index(traj[0][sampled_points_indeces], k=k, delaunay=delaunay)
+    edge_index = compute_edges_index(torch.tensor(traj[0][sampled_points_indeces]), k=k)
     # plot_mesh(traj[0][sampled_points_indeces], edge_index.T)
 
     for time_idx in range(1, traj.shape[0]):
@@ -94,28 +95,22 @@ def process_traj(traj, dt, k=3, delaunay=False, subsample=False, num_samples=300
     return trajectory_data
 
 
-def compute_edges_index(points, k=3, delaunay=False):
-    if delaunay:
-        points2d = points[:, :2]
-        tri = Delaunay(points2d)
-        edges = set()
-        for simplex in tri.simplices:
-            for i in range(3):
-                edge = (min(simplex[i], simplex[(i + 1) % 3]), max(simplex[i], simplex[(i + 1) % 3]))
-                edges.add(edge)
-        edge_index = np.asarray(list(edges))
-        edge_index = torch.tensor(edge_index, dtype=torch.long).t().contiguous()
-    else:
-        # Use a k-D tree for efficient nearest neighbors computation
-        tree = cKDTree(points)
-        # For simplicity, we find the 3 nearest neighbors; you can adjust this number
-        _, indices = tree.query(points, k=k+1)
+def compute_edges_index(points, k=3):
+    """
+    Uses a Delaunay triangulation to compute the edges of the mesh.
+    TODO : Implement Delaunay neighbors
 
-        # Skip the first column because it's the point itself
-        edge_index = np.vstack({tuple(sorted([i, j])) for i, row in enumerate(indices) for j in row[1:]})
-        edge_index = torch.tensor(edge_index, dtype=torch.long).t().contiguous()
+    Args:
+        points:
+        k:
 
-    return edge_index
+    Returns:
+
+    """
+    points2d = torch_geometric.data.Data(pos=points[:, :2])
+    mesh = KNNGraph(k=k)(points2d)
+
+    return mesh.edge_index
 
 
 def compute_edge_features(points, edge_index):
