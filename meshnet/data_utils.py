@@ -4,8 +4,9 @@ import os
 import torch
 import matplotlib.pyplot as plt
 import torch_geometric
-from torch_geometric.transforms import KNNGraph
 from meshnet.viz import plot_mesh, plot_pcd_list, create_gif
+import scipy
+
 
 # function to load json data
 def load_traj(data_path):
@@ -43,7 +44,6 @@ def farthest_point_sampling(points, num_samples):
     return selected_indices
 
 
-
 def process_traj(traj, dt, k=3, delaunay=False, subsample=False, num_samples=300):
     trajectory_data = {"pos": [], "velocity": [], "node_type": [], "edge_index": [], "edge_displacement": [], 'edge_norm': []}
 
@@ -52,7 +52,7 @@ def process_traj(traj, dt, k=3, delaunay=False, subsample=False, num_samples=300
     else:
         sampled_points_indeces = np.arange(traj[0].shape[0])
 
-    edge_index = compute_edges_index(torch.tensor(traj[0][sampled_points_indeces]), k=k)
+    mesh = compute_mesh(torch.tensor(traj[0][sampled_points_indeces]))
     # plot_mesh(traj[0][sampled_points_indeces], edge_index.T)
 
     for time_idx in range(1, traj.shape[0]):
@@ -73,8 +73,8 @@ def process_traj(traj, dt, k=3, delaunay=False, subsample=False, num_samples=300
         trajectory_data["node_type"].append(node_type)
 
         # compute edge features
-        displacement, norm = compute_edge_features(torch.tensor(pos_current, dtype=torch.float), edge_index)
-        trajectory_data["edge_index"].append(edge_index)
+        displacement, norm = compute_edge_features(torch.tensor(pos_current, dtype=torch.float), mesh.edge_index)
+        trajectory_data["edge_index"].append(mesh.edge_index)
         trajectory_data["edge_displacement"].append(displacement)
         trajectory_data["edge_norm"].append(norm)
 
@@ -82,7 +82,7 @@ def process_traj(traj, dt, k=3, delaunay=False, subsample=False, num_samples=300
     trajectory_data["pos"].insert(0, traj[0][sampled_points_indeces])
     trajectory_data["velocity"].insert(0, np.zeros_like(trajectory_data["velocity"][0]))  # Assuming initial velocity is zero
     trajectory_data["node_type"].insert(0, trajectory_data["node_type"][0])
-    trajectory_data["edge_index"].insert(0, edge_index)
+    trajectory_data["edge_index"].insert(0, mesh.edge_index)
     trajectory_data["edge_displacement"].insert(0, trajectory_data["edge_displacement"][0])
     trajectory_data["edge_norm"].insert(0, trajectory_data["edge_norm"][0])
 
@@ -95,22 +95,52 @@ def process_traj(traj, dt, k=3, delaunay=False, subsample=False, num_samples=300
     return trajectory_data
 
 
-def compute_edges_index(points, k=3):
+def simplices2edges(simplices: np.ndarray) -> np.ndarray:
     """
-    Uses a Delaunay triangulation to compute the edges of the mesh.
-    TODO : Implement Delaunay neighbors
+    Converts the simplices of a mesh to the undirected mesh edges defined by the vertice ids.
 
     Args:
-        points:
-        k:
+        simplices: [n, 3] array of simplices
 
-    Returns:
+    Returns:[m, 2] array of edges.
 
     """
-    points2d = torch_geometric.data.Data(pos=points[:, :2])
-    mesh = KNNGraph(k=k)(points2d)
 
-    return mesh.edge_index
+    # Reshape the simplices array to create a view with two columns
+    edges = simplices[:, [0, 1]]
+    edges = np.vstack([edges, simplices[:, [1, 2]]])
+    edges = np.vstack([edges, simplices[:, [2, 0]]])
+
+    # Sort the edges along axis 1 to make sure duplicate edges are next to each other
+    sorted_edges = np.sort(edges, axis=1)
+
+    # Use np.unique to get unique rows, which represent unique undirected edges
+    unique_edges = np.unique(sorted_edges, axis=0)
+
+    return unique_edges
+
+
+def compute_mesh(points: torch.Tensor) -> torch_geometric.data.Data:
+    """
+    Uses a Delaunay triangulation to compute of the mesh.
+    The triangulation will only consider x and y coordinates.
+
+    Args:
+        points: [n, 3] array of points
+
+    Returns: torch_geometric.data.Data object with pos, face, and edge_index attributes.
+
+    """
+
+    pos = points[:, :2].cpu().numpy()
+
+    tri = scipy.spatial.Delaunay(pos)
+
+    edges = simplices2edges(tri.simplices)
+    edge_index = torch.from_numpy(edges).t().contiguous().to(points.device, dtype=torch.long)
+    face = torch.from_numpy(tri.simplices).t().contiguous().to(points.device, dtype=torch.long)
+
+    return torch_geometric.data.Data(pos=points, face=face, edge_index=edge_index)
 
 
 def compute_edge_features(points, edge_index):
@@ -122,24 +152,25 @@ def compute_edge_features(points, edge_index):
 
 
 
-if __name__ == '__main__':
-    # Load trajectory
-    traj = load_traj('../data/dataset/final_scene_1_rgb-005/final_scene_1_gt_eval.npz')
-    points = traj[0]
-    edge_index = compute_edges_index(points, k=3)
-
-    # create a gif of the trajectory sequence
-    save_data_path = './data/figs'
-    image_files = []
-    for t in range(traj.shape[0]):
-        file_name = os.path.join(save_data_path, f'mesh_t{t}.png')
-        points = traj[t]
-        plot_mesh(points, np.transpose(edge_index), center_plot=np.asarray([0,0,0]), white_bkg=True, save_fig=True, file_name=file_name)
-        image_files.append(file_name)
-
-    # Create GIF
-    gif_path = "trajectory_mesh.gif"
-    create_gif(image_files, './data/gifs/trajectory_mesh.gif', fps=10)
-    # plot the trajectory
-    print(edge_index)
+# if __name__ == '__main__':
+#     # Load trajectory
+#     traj = load_traj('../data/dataset/final_scene_1_rgb-005/final_scene_1_gt_eval.npz')
+#     points = traj[0]
+#     mesh = make_mesh(points)
+#     trajdge_index = mesh.edge_index
+#
+#     # create a gif of the trajectory sequence
+#     save_data_path = './data/figs'
+#     image_files = []
+#     for t in range(traj.shape[0]):
+#         file_name = os.path.join(save_data_path, f'mesh_t{t}.png')
+#         points = traj[t]
+#         plot_mesh(points, np.transpose(edge_index), center_plot=np.asarray([0,0,0]), white_bkg=True, save_fig=True, file_name=file_name)
+#         image_files.append(file_name)
+#
+#     # Create GIF
+#     gif_path = "trajectory_mesh.gif"
+#     create_gif(image_files, './data/gifs/trajectory_mesh.gif', fps=10)
+#     # plot the trajectory
+#     print(edge_index)
 

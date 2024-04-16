@@ -94,11 +94,11 @@ def render(viewpoint_camera, pc: GaussianMesh, simulator: MeshSimulator, pipe, b
         scales_deform, opacity_deform, rotations_deform = scales, opacity, rotations
 
         means3D_deform = simulator.predict_position(
-            init_positions=pc.get_xyz,
+            init_positions=pc.mesh.pos,
             time_vector=time,
             node_type=pc.node_type,
-            edge_index=pc.edge_index,
-            edge_features=pc.edge_features)
+            edge_index=pc.mesh.edge_index,
+            edge_features=pc.mesh.edge_attr)
 
     # TODO Fix the deformation table approach
     means3D_final = means3D_deform

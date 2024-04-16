@@ -10,6 +10,8 @@
 
 import torch
 import numpy as np
+import torch_geometric.utils
+
 from utils.general_utils import inverse_sigmoid, get_expon_lr_func, build_rotation
 from torch import nn
 import os
@@ -20,7 +22,7 @@ from simple_knn._C import distCUDA2
 from utils.graphics_utils import BasicPointCloud
 from utils.general_utils import strip_symmetric, build_scaling_rotation
 
-from meshnet.data_utils import compute_edges_index, compute_edge_features
+from meshnet.data_utils import compute_mesh, compute_edge_features
 from meshnet.model_utils import NodeType
 
 # TODO Add deformation table to GNN
@@ -67,34 +69,34 @@ class GaussianMesh:
         self.setup_functions()
 
         self.node_type = torch.empty(0)
-        self.edge_index = torch.empty(0)
-        self.edge_features = torch.empty(0)
+
         self.edge_displacement = torch.empty(0)
         self.edge_norm = torch.empty(0)
+
+        self.mesh = torch_geometric.data.Data()
 
     @torch.no_grad()
     def make_mesh(self):
         """
         Create the mesh from the gaussians.
         """
+        # TODO Check the whole detach and clone mess
 
-        # TODO Make method work fully on GPU
-        self.edge_index = compute_edges_index(self.get_xyz)
-        self.node_type = torch.full(self.get_xyz.shape[0:1], fill_value=NodeType.CLOTH, device="cuda")
+        self.mesh = compute_mesh(self._xyz)
 
-        edge_displacement, edge_norm = compute_edge_features(self._xyz.clone().detach(),
-                                                             self.edge_index.clone().detach())
+        self.node_type = torch.full(self.mesh.pos.shape[0:1], fill_value=NodeType.CLOTH, device="cuda")
+
+        edge_displacement, edge_norm = compute_edge_features(self.mesh.pos.clone().detach(),
+                                                             self.mesh.edge_index.clone().detach())
         self.edge_displacement = edge_displacement
         self.edge_norm = edge_norm
 
-        self.edge_features = torch.hstack(
+        self.mesh.edge_attr = torch.hstack(
             (edge_displacement.clone().detach().to(torch.float32).contiguous(),
              edge_norm.clone().detach().to(torch.float32).contiguous())
         )
 
-        # Function to visualize the mesh givent the processed edge points for debugging purposes
-        # plot_mesh(mesh_points.clone().detach().cpu(), self.edge_index.T)
-        # plot_mesh(mesh_points.clone().detach().cpu(), self.edge_index.T, save_fig=True, file_name='mesh.png')
+
 
     def capture(self):
         return (
