@@ -95,31 +95,6 @@ def process_traj(traj, dt, k=3, delaunay=False, subsample=False, num_samples=300
     return trajectory_data
 
 
-def simplices2edges(simplices: np.ndarray) -> np.ndarray:
-    """
-    Converts the simplices of a mesh to the undirected mesh edges defined by the vertice ids.
-
-    Args:
-        simplices: [n, 3] array of simplices
-
-    Returns:[m, 2] array of edges.
-
-    """
-
-    # Reshape the simplices array to create a view with two columns
-    edges = simplices[:, [0, 1]]
-    edges = np.vstack([edges, simplices[:, [1, 2]]])
-    edges = np.vstack([edges, simplices[:, [2, 0]]])
-
-    # Sort the edges along axis 1 to make sure duplicate edges are next to each other
-    sorted_edges = np.sort(edges, axis=1)
-
-    # Use np.unique to get unique rows, which represent unique undirected edges
-    unique_edges = np.unique(sorted_edges, axis=0)
-
-    return unique_edges
-
-
 def compute_mesh(points: torch.Tensor) -> torch_geometric.data.Data:
     """
     Uses a Delaunay triangulation to compute of the mesh.
@@ -136,11 +111,11 @@ def compute_mesh(points: torch.Tensor) -> torch_geometric.data.Data:
 
     tri = scipy.spatial.Delaunay(pos)
 
-    edges = simplices2edges(tri.simplices)
-    edge_index = torch.from_numpy(edges).t().contiguous().to(points.device, dtype=torch.long)
     face = torch.from_numpy(tri.simplices).t().contiguous().to(points.device, dtype=torch.long)
+    mesh = torch_geometric.data.Data(pos=points, face=face)
+    mesh = torch_geometric.transforms.FaceToEdge(remove_faces=False)(mesh)
 
-    return torch_geometric.data.Data(pos=points, face=face, edge_index=edge_index)
+    return mesh
 
 
 def compute_edge_features(points, edge_index):

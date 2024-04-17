@@ -14,7 +14,7 @@ import random
 import json
 from utils.system_utils import searchForMaxIteration
 from scene.dataset_readers import sceneLoadTypeCallbacks
-from meshnet.gaussian_mesh import GaussianMesh
+from scene.gaussian_model import GaussianModel
 from scene.dataset import FourDGSdataset, MDNerfDataset
 from arguments import ModelParams
 from utils.camera_utils import cameraList_from_camInfos, camera_to_JSON
@@ -22,9 +22,9 @@ from torch.utils.data import Dataset
 
 class Scene:
 
-    gaussians : GaussianMesh
+    gaussians : GaussianModel
 
-    def __init__(self, args : ModelParams, gaussians : GaussianMesh, load_iteration=None, shuffle=True, resolution_scales=[1.0], load_coarse=False,user_args=None):
+    def __init__(self, args : ModelParams, gaussians : GaussianModel, load_iteration=None, shuffle=True, resolution_scales=[1.0], load_coarse=False,user_args=None):
         """b
         :param path: Path to colmap scene main folder.
         """
@@ -138,7 +138,7 @@ class Scene:
         else:
             point_cloud_path = os.path.join(self.model_path, "point_cloud/iteration_{}".format(iteration))
         self.gaussians.save_ply(os.path.join(point_cloud_path, "point_cloud.ply"))
-        # self.gaussians.save_deformation(point_cloud_path) # TODO Figure out what this does
+
     def getTrainCameras(self, scale=1.0):
         return self.train_camera
 
