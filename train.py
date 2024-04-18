@@ -24,7 +24,7 @@ import sys
 from scene import Scene
 
 from meshnet.gaussian_mesh import GaussianMesh
-from meshnet.meshnet import MeshSimulator
+from meshnet.meshnet_network import MeshSimulator
 from train_meshnet import rollout
 
 from utils.general_utils import safe_state

@@ -4,12 +4,22 @@ import os
 import torch
 import matplotlib.pyplot as plt
 from scipy.spatial import cKDTree, Delaunay
+import glob
 from meshnet.viz import plot_mesh, plot_pcd_list, create_gif
+import h5py
+import math
 
 # function to load json data
 def load_traj(data_path):
     traj = np.load(data_path, allow_pickle=True)['traj']
     return traj
+
+def load_sim_traj(data_path, load_keys=['pos', 'vel', 'actions', 'trajectory_params', 'gripper_pos', 'pick', 'place']):
+    file_path = glob.glob(os.path.join(data_path, '*h5'))[0]
+    with h5py.File(file_path, 'r') as f:
+        data = {key: np.array(f[key]) for key in load_keys}
+    return data
+
 
 
 def farthest_point_sampling(points, num_samples):
@@ -43,15 +53,15 @@ def farthest_point_sampling(points, num_samples):
 
 
 
-def process_traj(traj, dt, k=3, delaunay=False, subsample=False, num_samples=300):
-    trajectory_data = {"pos": [], "velocity": [], "node_type": [], "edge_index": [], "edge_displacement": [], 'edge_norm': []}
+def process_traj(traj, dt, k=3, delaunay=False, subsample=False, num_samples=300, sim_data=False, norm_threshold=0.01):
+    trajectory_data = {"pos": [], "velocity": [], "node_type": [], "edge_index": [], "edge_displacement": [], 'edge_norm': [], 'edge_norm': [], 'edge_faces': []}
 
     if subsample:
         sampled_points_indeces = farthest_point_sampling(traj[0], num_samples)
     else:
         sampled_points_indeces = np.arange(traj[0].shape[0])
 
-    edge_index = compute_edges_index(traj[0][sampled_points_indeces], k=k, delaunay=delaunay)
+    edge_index, faces = compute_edges_index(traj[0][sampled_points_indeces], k=k, delaunay=delaunay, sim_data=sim_data, norm_threshold=norm_threshold)
     # plot_mesh(traj[0][sampled_points_indeces], edge_index.T)
 
     for time_idx in range(1, traj.shape[0]):
@@ -63,7 +73,7 @@ def process_traj(traj, dt, k=3, delaunay=False, subsample=False, num_samples=300
         velocity = (pos_current - pos_previous) / dt
 
         # Store data
-        trajectory_data["pos"].append(pos_previous)
+        trajectory_data["pos"].append(pos_current)
         trajectory_data["velocity"].append(velocity)
         # so far we only have one node type
         node_type = 0
@@ -73,9 +83,16 @@ def process_traj(traj, dt, k=3, delaunay=False, subsample=False, num_samples=300
 
         # compute edge features
         displacement, norm = compute_edge_features(torch.tensor(pos_current, dtype=torch.float), edge_index)
+        
+        # prunte edges at the first time step
+        if time_idx == 1:
+            edge_index = edge_index[:,(norm < norm_threshold)[:, 0]]
+            displacement, norm = compute_edge_features(torch.tensor(pos_current, dtype=torch.float), edge_index)
+        
         trajectory_data["edge_index"].append(edge_index)
         trajectory_data["edge_displacement"].append(displacement)
         trajectory_data["edge_norm"].append(norm)
+        trajectory_data["edge_faces"].append(faces)
 
     # Handle the first position manually if needed (e.g., set initial velocity to zero)
     trajectory_data["pos"].insert(0, traj[0][sampled_points_indeces])
@@ -84,27 +101,53 @@ def process_traj(traj, dt, k=3, delaunay=False, subsample=False, num_samples=300
     trajectory_data["edge_index"].insert(0, edge_index)
     trajectory_data["edge_displacement"].insert(0, trajectory_data["edge_displacement"][0])
     trajectory_data["edge_norm"].insert(0, trajectory_data["edge_norm"][0])
+    trajectory_data["edge_faces"].insert(0, trajectory_data["edge_faces"][0])
 
     # iterate over all keys to make it numpy array
     for key in trajectory_data.keys():
-        if key in ["edge_index", "edge_displacement", "edge_norm"]:#
+        if key in ["edge_index", "edge_displacement", "edge_norm", "edge_faces"]:#
             trajectory_data[key] = torch.stack(trajectory_data[key])
         else:
             trajectory_data[key] = np.array(trajectory_data[key])
     return trajectory_data
 
 
-def compute_edges_index(points, k=3, delaunay=False):
+
+def compute_edges_index(points, k=3, delaunay=False, sim_data=False, norm_threshold=0.01):
     if delaunay:
-        points2d = points[:, :2]
+        if sim_data:
+            points2d = points[:, [0,2]]
+        else:
+            points2d = points[:, :2]
         tri = Delaunay(points2d)
         edges = set()
+        faces = []
         for simplex in tri.simplices:
-            for i in range(3):
-                edge = (min(simplex[i], simplex[(i + 1) % 3]), max(simplex[i], simplex[(i + 1) % 3]))
-                edges.add(edge)
+            valid_face = True
+            current_edges = []
+            
+            for i in range(3):                
+                p1, p2 = simplex[i], simplex[(i + 1) % 3]
+                edge = (min(p1, p2), max(p1, p2))
+                current_edges.append(edge)
+                # Calculate the norm (distance) between the points
+                norm = np.linalg.norm(points2d[p1] - points2d[p2])
+                
+                # Check if the edge meets the threshold condition
+                if norm_threshold is not None and norm > norm_threshold:
+                    valid_face = False
+                else:
+                    edges.add(edge)
+                    
+            # Add the face if all edges are valid
+            if valid_face:
+                faces.append(simplex)
+                
         edge_index = np.asarray(list(edges))
         edge_index = torch.tensor(edge_index, dtype=torch.long).t().contiguous()
+        # Convert faces list to a tensor
+        faces = torch.tensor(faces, dtype=torch.long).t().contiguous()
+        return edge_index, faces
     else:
         # Use a k-D tree for efficient nearest neighbors computation
         tree = cKDTree(points)

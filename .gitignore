@@ -9,7 +9,12 @@ diff_rasterization/dist
 tensorboard_3d
 screenshots
 data/
-data
 argument/
 scripts/
 weights/
+assets/
+manipulation/assets
+pyflex/
+softgym/
+wandb/
+scripts_bash/

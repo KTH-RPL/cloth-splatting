@@ -19,12 +19,12 @@ class SamplesClothDataset(torch.utils.data.Dataset):
         self.k = knn
         self.subsample = subsample
         self.num_samples = num_samples
+        self._input_length_sequence = input_length_sequence
 
         self._data = self.load_data(data_path)
         self.transform = transform
 
         # length of each trajectory in the dataset
-        self._input_length_sequence = input_length_sequence
         self._data_lengths = [x["pos"].shape[0] - self._input_length_sequence for x in self._data]
         self._length = sum(self._data_lengths)
 
@@ -169,9 +169,9 @@ def get_data_loader_by_trajectories(path, knn=3, delaunay=False, subsample=False
 
 
 if __name__=='__main__':
-    data_path = '../data/dataset/final_scene_1_rgb-005/final_scene_1_gt_eval.npz'
+    data_path = './data/final_scenes/smaller_scene/final_scene_1_gt_eval.npz'
     # dataset = SamplesClothDataset(data_path)
     dataloader = get_data_loader_by_samples(data_path, input_length_sequence=1, dt=0.01, batch_size=8, shuffle=True)
     # get item 0 from dataloader
     graph = next(iter(dataloader))
-    print()
+    print("FATTOOO")
