@@ -144,8 +144,12 @@ class OptimizationParams(ParamGroup):
         self.opacity_threshold_fine_init = 0.005
         self.opacity_threshold_fine_after = 0.005
 
+        self.static_reconst = False
+        self.static_reconst_iteration = 2000
         self.initial_gaussians = 2000
         self.no_coarse = False
+
+        self.mesh_type = 'multi'
 
         super().__init__(parser, "Optimization Parameters")
 

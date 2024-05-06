@@ -16,6 +16,7 @@ import os
 import torch
 from random import randint
 
+from meshnet.data_utils import farthest_point_sampling
 from meshnet.dataloader import SamplesClothDataset
 from utils.graphics_utils import BasicPointCloud
 from utils.loss_utils import l1_loss, ssim, l2_loss, lpips_loss
@@ -23,7 +24,7 @@ from gaussian_renderer import render, network_gui
 import sys
 from scene import Scene
 
-from meshnet.gaussian_mesh import GaussianMesh
+from meshnet.gaussian_mesh import GaussianMesh, MultiGaussianMesh
 from meshnet.meshnet import MeshSimulator
 from train_meshnet import rollout
 
@@ -94,7 +95,7 @@ def flow_loss(all_projections=None, visibility_filter_list=None, viewpoint_cams=
     raft_flow_1 = viewpoint_cams[1].flow
 
 
-def scene_reconstruction(dataset, opt, hyper, pipe, testing_iterations, saving_iterations,
+def scene_reconstruction(dataset, opt: OptimizationParams, hyper, pipe, testing_iterations, saving_iterations,
                          checkpoint_iterations, checkpoint, debug_from,
                          gaussians: GaussianMesh, simulator: MeshSimulator, scene: Scene, stage, tb_writer, train_iter, timer, user_args=None):
     first_iter = 0
@@ -153,7 +154,7 @@ def scene_reconstruction(dataset, opt, hyper, pipe, testing_iterations, saving_i
         gaussians.update_learning_rate(iteration)
 
         # Every 1000 its we increase the levels of SH up to a maximum degree
-        if iteration % 1000 == 0:
+        if iteration % 100 == 0:
             gaussians.oneupSHdegree()
 
         # Pick a random Camera
@@ -173,6 +174,9 @@ def scene_reconstruction(dataset, opt, hyper, pipe, testing_iterations, saving_i
         else:
             idx = randint(0, len(viewpoint_stack) - 1)  # picking a random viewpoint
             viewpoint_cams = viewpoint_stack[idx]  # returning 3 subsequence timesteps
+
+        if opt.static_reconst and iteration < opt.static_reconst_iteration:
+            viewpoint_cams = [viewpoint_stack.get_one_item(iteration % len(viewpoint_stack), 0)]
 
         # Render
         if (iteration - 1) == debug_from:
@@ -232,7 +236,7 @@ def scene_reconstruction(dataset, opt, hyper, pipe, testing_iterations, saving_i
 
         if user_args.use_wandb and stage == "fine":
             wandb.log({"train/psnr": psnr_, "train/loss": loss}, step=iteration)
-            wandb.log({"train/num_gaussians": gaussians._xyz.shape[0]}, step=iteration)
+            wandb.log({"train/num_gaussians": gaussians.num_gaussians}, step=iteration)
 
         n_cams = len(viewpoint_cams)
 
@@ -413,7 +417,7 @@ def scene_reconstruction(dataset, opt, hyper, pipe, testing_iterations, saving_i
             # Progress bar
             ema_loss_for_log = 0.4 * loss.item() + 0.6 * ema_loss_for_log
             ema_psnr_for_log = 0.4 * psnr_ + 0.6 * ema_psnr_for_log
-            total_point = gaussians._xyz.shape[0]
+            total_point = gaussians.num_gaussians
             if iteration % 10 == 0:
                 progress_bar.set_postfix({"Loss": f"{ema_loss_for_log:.{7}f}",
                                           "psnr": f"{psnr_:.{2}f}",
@@ -442,7 +446,8 @@ def scene_reconstruction(dataset, opt, hyper, pipe, testing_iterations, saving_i
                     # total_images.append(to8b(temp_image).transpose(1,2,0))
             timer.start()
             # Densification
-            if iteration < opt.densify_until_iter:
+            if iteration < opt.densify_until_iter and not (
+                    opt.static_reconst and iteration < opt.static_reconst_iteration):
                 # Keep track of max radii in image-space for pruning
                 gaussians.max_radii2D[visibility_filter] = torch.max(gaussians.max_radii2D[visibility_filter],
                                                                      radii[visibility_filter])
@@ -475,11 +480,19 @@ def scene_reconstruction(dataset, opt, hyper, pipe, testing_iterations, saving_i
 
             # Optimizer step
             if iteration < opt.iterations:
-                gaussians.optimizer.step()
-                gaussians.optimizer.zero_grad(set_to_none=True)
-
-                meshnet_optimizer.step()
-                meshnet_optimizer.zero_grad()
+                if opt.static_reconst:
+                    if iteration < opt.static_reconst_iteration:
+                        gaussians.optimizer.step()
+                        gaussians.optimizer.zero_grad(set_to_none=True)
+                        meshnet_optimizer.zero_grad()
+                    else:
+                        meshnet_optimizer.step()
+                        meshnet_optimizer.zero_grad()
+                else:
+                    gaussians.optimizer.step()
+                    gaussians.optimizer.zero_grad(set_to_none=True)
+                    meshnet_optimizer.step()
+                    meshnet_optimizer.zero_grad()
 
             if iteration in checkpoint_iterations:
                 print("\n[ITER {}] Saving Checkpoint".format(iteration))
@@ -487,7 +500,7 @@ def scene_reconstruction(dataset, opt, hyper, pipe, testing_iterations, saving_i
                            os.path.join(scene.model_path, "chkpnt" + str(iteration) + ".pth"))
 
 
-def initial_reconstruction(gaussians, scene, initial_samples, source_path):
+def initial_reconstruction(gaussians, scene, initial_samples, source_path, mesh_type):
     """
     Creates the gaussians from the ground truth points from the evaluation set.
 
@@ -515,10 +528,16 @@ def initial_reconstruction(gaussians, scene, initial_samples, source_path):
         num_samples=initial_samples
     )
     node_coords = dataset[0].pos           # (nnode, ndims)
-    shs = np.random.random((initial_samples, 3)) / 255.0
-    pcd = BasicPointCloud(points=node_coords, colors=SH2RGB(shs), normals=np.zeros((initial_samples, 3)))
 
-    gaussians.create_from_pcd(pcd, scene.cameras_extent)
+    if mesh_type == 'single':
+        shs = np.random.random((initial_samples, 3)) / 255.0
+        pcd = BasicPointCloud(points=node_coords, colors=SH2RGB(shs), normals=np.zeros((initial_samples, 3)))
+
+        gaussians.create_from_pcd(pcd, scene.cameras_extent)
+    elif mesh_type == 'multi':
+        mesh_vertices = farthest_point_sampling(node_coords, initial_samples)
+        node_coords = torch.tensor(node_coords[mesh_vertices], device='cuda')
+        gaussians.create_mesh_from_vertices(node_coords, scene.cameras_extent)
 
 
 def training(dataset, hyper, opt, pipe, meshnet_params, testing_iterations, saving_iterations, checkpoint_iterations, checkpoint,
@@ -527,7 +546,13 @@ def training(dataset, hyper, opt, pipe, meshnet_params, testing_iterations, savi
     # first_iter = 0
     tb_writer = prepare_output_and_logger(expname)
     timer = Timer()
-    gaussians = GaussianMesh(dataset.sh_degree)
+
+    if opt.mesh_type == 'single':
+        gaussians = GaussianMesh(dataset.sh_degree)
+    elif opt.mesh_type == 'multi':
+        gaussians = MultiGaussianMesh(dataset.sh_degree)
+    else:
+        raise ValueError("Unknown Gaussian Mesh type")
 
     # load simulator
     simulator = MeshSimulator(
@@ -555,7 +580,7 @@ def training(dataset, hyper, opt, pipe, meshnet_params, testing_iterations, savi
 
     timer.start()
 
-    initial_reconstruction(gaussians, scene, opt.initial_gaussians, source_path=dataset.source_path)
+    initial_reconstruction(gaussians, scene, opt.initial_gaussians, dataset.source_path, opt.mesh_type)
 
     if not opt.no_coarse:
         scene_reconstruction(dataset, opt, hyper, pipe, testing_iterations, saving_iterations,
@@ -642,9 +667,9 @@ def training_report(tb_writer, iteration, Ll1, loss, elapsed, testing_iterations
         if tb_writer:
             tb_writer.add_histogram(f"{stage}/scene/opacity_histogram", scene.gaussians.get_opacity, iteration)
 
-            tb_writer.add_scalar(f'{stage}/total_points', scene.gaussians.get_xyz.shape[0], iteration)
+            tb_writer.add_scalar(f'{stage}/total_points', scene.gaussians.num_gaussians, iteration)
             #tb_writer.add_scalar(f'{stage}/deformation_rate',
-            #                     scene.gaussians._deformation_table.sum() / scene.gaussians.get_xyz.shape[0], iteration)
+            #                     scene.gaussians._deformation_table.sum() / scene.gaussians.get_xyz().shape[0], iteration)
             #tb_writer.add_histogram(f"{stage}/scene/motion_histogram",
             #                        scene.gaussians._deformation_accum.mean(dim=-1) / 100, iteration, max_bins=500)
 

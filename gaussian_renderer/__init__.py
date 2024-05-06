@@ -28,7 +28,7 @@ def render(viewpoint_camera, pc: GaussianMesh, simulator: MeshSimulator, pipe, b
     """
  
     # Create zero tensor. We will use it to make pytorch return gradients of the 2D (screen-space) means
-    screenspace_points = torch.zeros_like(pc.get_xyz, dtype=pc.get_xyz.dtype, requires_grad=True, device="cuda") + 0
+    screenspace_points = torch.zeros_like(pc.get_xyz(), dtype=pc.get_xyz().dtype, requires_grad=True, device="cuda") + 0
     try:
         screenspace_points.retain_grad()
     except:
@@ -57,12 +57,11 @@ def render(viewpoint_camera, pc: GaussianMesh, simulator: MeshSimulator, pipe, b
 
     rasterizer = GaussianRasterizer(raster_settings=raster_settings)
 
-    # means3D = pc.get_xyz
+    # means3D = pc.get_xyz()
     # add deformation to each points
     # deformation = pc.get_deformation
-    means3D = pc.get_xyz
+    means3D = pc.get_xyz()
         
-    time = torch.tensor(viewpoint_camera.time).to(means3D.device).repeat(means3D.shape[0],1)
     means2D = screenspace_points
     opacity = pc._opacity
 
@@ -93,15 +92,20 @@ def render(viewpoint_camera, pc: GaussianMesh, simulator: MeshSimulator, pipe, b
         # TODO Implement the shadow scalars
         scales_deform, opacity_deform, rotations_deform = scales, opacity, rotations
 
-        means3D_deform = simulator.predict_position(
-            init_positions=pc.mesh.pos,
-            time_vector=time,
-            node_type=pc.node_type,
-            edge_index=pc.mesh.edge_index,
-            edge_features=pc.mesh.edge_attr)
+        time = torch.tensor(viewpoint_camera.time).to(pc.mesh.pos.device).repeat(pc.mesh.pos.shape[0], 1)
 
-    # TODO Fix the deformation table approach
-    means3D_final = means3D_deform
+        if viewpoint_camera.time == 0:
+            means3D_deform = pc.mesh.pos
+            means3D_final = pc.get_xyz()
+        else:
+            means3D_deform = simulator.predict_position(
+                init_positions=pc.mesh.pos,
+                time_vector=time,
+                node_type=pc.node_type,
+                edge_index=pc.mesh.edge_index,
+                edge_features=pc.mesh.edge_attr)
+
+            means3D_final = pc.get_xyz(means3D_deform)
     rotations_final = rotations_deform
     scales_final = scales_deform
     opacity_final = opacity_deform
@@ -137,7 +141,7 @@ def render(viewpoint_camera, pc: GaussianMesh, simulator: MeshSimulator, pipe, b
     if override_color is None:
         if shadow_scalars is not None: # we compute colors in python to multiply with our shadow scalars
             shs_view = pc.get_features.transpose(1, 2).view(-1, 3, (pc.max_sh_degree+1)**2)
-            dir_pp = (pc.get_xyz - viewpoint_camera.camera_center.cuda().repeat(pc.get_features.shape[0], 1))
+            dir_pp = (pc.get_xyz() - viewpoint_camera.camera_center.cuda().repeat(pc.get_features.shape[0], 1))
             dir_pp_normalized = dir_pp/dir_pp.norm(dim=1, keepdim=True)
             sh2rgb = eval_sh(pc.active_sh_degree, shs_view, dir_pp_normalized)
             colors_precomp = torch.clamp_min(sh2rgb + 0.5, 0.0)

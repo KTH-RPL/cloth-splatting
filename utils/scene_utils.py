@@ -67,7 +67,7 @@ def render_training_image(scene, gaussians, viewpoints, render_func, pipe, backg
     
     pc_mask = gaussians.get_opacity
     pc_mask = pc_mask > 0.1
-    xyz = gaussians.get_xyz.detach()[pc_mask.squeeze()].cpu().permute(1,0).numpy()
+    xyz = gaussians.get_xyz().detach()[pc_mask.squeeze()].cpu().permute(1,0).numpy()
     # visualize_and_save_point_cloud(xyz, viewpoint.R, viewpoint.T, point_save_path)
     # 如果需要，您可以将PIL图像转换回PyTorch张量
     # return image

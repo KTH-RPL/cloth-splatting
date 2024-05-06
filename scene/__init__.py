@@ -115,9 +115,8 @@ class Scene:
 
         if self.loaded_iter:
             self.gaussians.load_ply(os.path.join(self.model_path,
-                                                           "point_cloud",
-                                                           "iteration_" + str(self.loaded_iter),
-                                                           "point_cloud.ply"))
+                                                 "point_cloud",
+                                                 "iteration_" + str(self.loaded_iter)))
         # elif load_coarse:
         #     self.gaussians.load_ply(os.path.join(self.model_path,
         #                                                    "point_cloud",
@@ -137,7 +136,7 @@ class Scene:
 
         else:
             point_cloud_path = os.path.join(self.model_path, "point_cloud/iteration_{}".format(iteration))
-        self.gaussians.save_ply(os.path.join(point_cloud_path, "point_cloud.ply"))
+        self.gaussians.save_ply(point_cloud_path)
 
     def getTrainCameras(self, scale=1.0):
         return self.train_camera

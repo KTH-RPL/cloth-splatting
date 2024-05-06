@@ -50,7 +50,7 @@ def process_traj(traj, dt, k=3, delaunay=False, subsample=False, num_samples=300
     if subsample:
         sampled_points_indeces = farthest_point_sampling(traj[0], num_samples)
     else:
-        sampled_points_indeces = np.arange(traj[0].shape[0])
+        sampled_points_indeces = torch.arange(traj[0].shape[0])
 
     mesh = compute_mesh(torch.tensor(traj[0][sampled_points_indeces]))
     # plot_mesh(traj[0][sampled_points_indeces], edge_index.T)
@@ -109,11 +109,12 @@ def compute_mesh(points: torch.Tensor) -> torch_geometric.data.Data:
 
     pos = points[:, :2].cpu().numpy()
 
-    tri = scipy.spatial.Delaunay(pos)
+    tri = scipy.spatial.Delaunay(pos, qhull_options='QJ')
 
     face = torch.from_numpy(tri.simplices).t().contiguous().to(points.device, dtype=torch.long)
     mesh = torch_geometric.data.Data(pos=points, face=face)
     mesh = torch_geometric.transforms.FaceToEdge(remove_faces=False)(mesh)
+    mesh = torch_geometric.transforms.GenerateMeshNormals()(mesh)
 
     return mesh
 
