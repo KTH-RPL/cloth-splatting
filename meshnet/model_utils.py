@@ -12,6 +12,29 @@ class NodeType(enum.IntEnum):
     # OUTFLOW = 5
     # WALL_BOUNDARY = 6
     # SIZE = 9
+    
+class IdentityNormalizer(nn.Module):
+    def __init__(self, size, name='IdentityNormalizer', device='cuda'):
+        super(IdentityNormalizer, self).__init__()
+        self.name = name
+        self._size = size
+        self._mean = torch.zeros((1, size), dtype=torch.float32, requires_grad=False, device=device)
+        self._std = torch.ones((1, size), dtype=torch.float32, requires_grad=False, device=device)
+
+    def forward(self, batched_data, accumulate=True):
+        return batched_data
+
+    def inverse(self, normalized_batch_data):
+        return normalized_batch_data
+
+    def get_variable(self):
+        dict = {'_size': self._size,
+                '_mean': self._mean,
+                '_std': self._std,
+                'name': self.name
+                }
+
+        return dict
 
 
 class Normalizer(nn.Module):
@@ -86,28 +109,40 @@ def datas_to_graph(training_example, dt, device):
     node_coords = training_example[0][0].to(device)  # (nnodes, dims)
     node_type = training_example[0][1].to(device)  # (nnodes, 1)
     velocity_feature = training_example[0][2].to(device)  # (nnodes, dims)
-    time_vector = training_example[0][3] * dt  # (nnodes, )
+    # action_feature = torch.zeros(velocity_feature.shape)
+    action_feature = training_example[0][3].to(device)  # (nnodes, dims)
+    time_vector = training_example[0][4] * dt  # (nnodes, )
     time_vector = time_vector.unsqueeze(1).to(device)
     # n_node_per_example = training_example[0][6]
-    edge_index = training_example[0][4].to(device)
-    edge_displacement = training_example[0][5].to(device)
+    edge_index = training_example[0][5].to(device)
     edge_norm = training_example[0][6].to(device)
+    edge_displacement = training_example[0][7].to(device)
 
-    # aggregate node features
-    node_features = torch.hstack((node_type, velocity_feature, time_vector)).to(device)
+    # aggregate node features, action, vel, node_type
+    # node_features = torch.hstack((node_type, velocity_feature, time_vector)).to(device)
+    node_features = torch.hstack((action_feature, velocity_feature, node_type)).to(device)
 
     # aggregate edge features
     edge_features = torch.hstack((edge_displacement, edge_norm)).to(device)
 
     # target velocity
     velocity_target = training_example[1].to(device)  # (nnodes, dims)
+    position_target = training_example[2].to(device)  # (nnodes, dims)
 
     # make graph
-    graph = Data(x=node_features.to(torch.float32).contiguous(),
-                 edge_index=edge_index,
-                 edge_attr=edge_features,
-                 y=velocity_target,
-                 pos=node_coords)
+    graph = Data(x=node_features,
+                    edge_index=edge_index,
+                    edge_attr=edge_features,
+                    y=velocity_target,
+                    pos=node_coords,
+                    pos_target=position_target,
+                    vel=velocity_feature
+                    )
+    # graph = Data(x=node_features.to(torch.float32).contiguous(),
+    #              edge_index=edge_index,
+    #              edge_attr=edge_features,
+    #              y=velocity_target,
+    #              pos=node_coords)
 
     return graph
 

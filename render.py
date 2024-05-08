@@ -22,7 +22,7 @@ from utils.general_utils import safe_state
 from argparse import ArgumentParser
 from arguments import ModelParams, PipelineParams, get_combined_args, ModelHiddenParams, MeshnetParams
 from meshnet.gaussian_mesh import GaussianMesh
-from meshnet.meshnet import MeshSimulator
+from meshnet.meshnet_network import MeshSimulator
 from time import time
 import glob 
 import matplotlib.pyplot as plt

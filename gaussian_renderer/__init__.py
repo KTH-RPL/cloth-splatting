@@ -14,7 +14,7 @@ import math
 import numpy as np
 from diff_gaussian_rasterization import GaussianRasterizationSettings, GaussianRasterizer
 from meshnet.gaussian_mesh import GaussianMesh
-from meshnet.meshnet import MeshSimulator
+from meshnet.meshnet_network import MeshSimulator
 from utils.sh_utils import eval_sh
 import matplotlib.pyplot as plt
 

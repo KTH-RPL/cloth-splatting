@@ -9,6 +9,7 @@ from meshnet.model_utils import Normalizer
 from meshnet.graph_network import EncodeProcessDecode
 
 
+
 class MeshSimulator(nn.Module):
 
     def __init__(
@@ -93,7 +94,7 @@ class MeshSimulator(nn.Module):
             pass
 
         # embed time
-        node_features.append(time_vector)
+        node_features.append(time_vector[:, None])
 
         # embed integer node_type to onehot vector
         node_type = torch.squeeze(node_type.long())

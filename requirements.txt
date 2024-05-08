@@ -12,3 +12,5 @@ wandb
 open3d
 seaborn
 absl-py
+cython
+gdist
