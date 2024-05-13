@@ -4,7 +4,6 @@ import numpy as np
 from utils.general_utils import PILtoTorch
 from utils.graphics_utils import fov2focal, focal2fov
 import torch
-from utils.camera_utils import loadCam
 from utils.graphics_utils import focal2fov
 
 class FourDGSdataset(Dataset):
@@ -116,8 +115,10 @@ class MDNerfDataset(Dataset):
         FovY = caminfo.FovY
         time = caminfo.time
         flow = caminfo.flow
+        time_id = caminfo.time_id
+        view_id = caminfo.view_id
         return Camera(colmap_id=view_id,R=R,T=T,FoVx=FovX,FoVy=FovY,image=image,gt_alpha_mask=None,
-                          image_name=f"{view_id}",uid=view_id,data_device=torch.device("cuda"),time=time,flow=flow)
+                          image_name=f"{view_id}",uid=view_id, view_id=view_id, time_id=time_id, data_device=torch.device("cuda"),time=time,flow=flow)
     def __len__(self):
         
         return self.n_viewpoints

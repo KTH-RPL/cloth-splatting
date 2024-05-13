@@ -16,8 +16,8 @@ from utils.graphics_utils import fov2focal
 
 WARNED = False
 
-def loadCam(args, id, cam_info, resolution_scale):
 
+def load_cam(args, id, cam_info, resolution_scale):
 
     # resized_image_rgb = PILtoTorch(cam_info.image, resolution)
 
@@ -31,14 +31,14 @@ def loadCam(args, id, cam_info, resolution_scale):
                   FoVx=cam_info.FovX, FoVy=cam_info.FovY, 
                   image=cam_info.image, gt_alpha_mask=None,
                   image_name=cam_info.image_name, uid=id, data_device=args.data_device, 
-                  time = cam_info.time,
+                  time = cam_info.time, time_id=cam_info.time_id, view_id=cam_info.view_id
 )
 
 def cameraList_from_camInfos(cam_infos, resolution_scale, args):
     camera_list = []
 
     for id, c in enumerate(cam_infos):
-        camera_list.append(loadCam(args, id, c, resolution_scale))
+        camera_list.append(load_cam(args, id, c, resolution_scale))
 
     return camera_list
 
