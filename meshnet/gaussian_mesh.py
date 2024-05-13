@@ -26,7 +26,7 @@ from simple_knn._C import distCUDA2
 from utils.graphics_utils import BasicPointCloud
 from utils.general_utils import strip_symmetric, build_scaling_rotation
 
-from meshnet.data_utils import compute_mesh, compute_edge_features, farthest_point_sampling
+from meshnet.data_utils import compute_mesh, compute_edge_features, load_mesh_from_h5py
 from meshnet.model_utils import NodeType
 
 from scene.gaussian_model import GaussianModel
@@ -42,7 +42,6 @@ class GaussianMesh(GaussianModel):
     def __init__(self, sh_degree: int):
         super().__init__(sh_degree)
 
-        self.node_type = torch.empty(0)
         self.edge_displacement = torch.empty(0)
         self.edge_norm = torch.empty(0)
         self.mesh = torch_geometric.data.Data()
@@ -55,7 +54,6 @@ class GaussianMesh(GaussianModel):
         # TODO Check the whole detach and clone mess
 
         self.mesh = compute_mesh(vertices)
-        self.node_type = torch.full(self.mesh.pos.shape[0:1], fill_value=NodeType.CLOTH, device="cuda")
 
         self.edge_displacement, self.edge_norm = compute_edge_features(self.mesh.pos.clone().detach(),
                                                                        self.mesh.edge_index.clone().detach())
@@ -91,8 +89,6 @@ class MultiGaussianMesh(GaussianModel):
     def __init__(self, sh_degree: int):
         super().__init__(sh_degree)
 
-        self.node_type = torch.empty(0)
-
         self.face_bary = torch.empty(0)          # [n_gaussians, 3]
         self.face_ids = torch.empty(0)           # [n_gaussians, 3]
         self.face_offset = torch.empty(0)        # [n_gaussians, 1]       # TODO Implement face offset
@@ -100,23 +96,6 @@ class MultiGaussianMesh(GaussianModel):
         self.edge_displacement = torch.empty(0)
         self.edge_norm = torch.empty(0)
         self.mesh = torch_geometric.data.Data()
-
-    @torch.no_grad()
-    def make_mesh(self, vertices):
-        """
-        Create the mesh from the gaussians.
-        """
-        # TODO Check the whole detach and clone mess
-
-        self.mesh = compute_mesh(vertices)
-        self.node_type = torch.full(self.mesh.pos.shape[0:1], fill_value=NodeType.CLOTH, device="cuda")
-
-        self.edge_displacement, self.edge_norm = compute_edge_features(self.mesh.pos.clone().detach(),
-                                                                       self.mesh.edge_index.clone().detach())
-        self.mesh.edge_attr = torch.hstack(
-            (self.edge_displacement.clone().detach().to(torch.float32).contiguous(),
-             self.edge_norm.clone().detach().to(torch.float32).contiguous())
-        )
 
     def training_setup(self, training_args):
         self.percent_dense = training_args.percent_dense
@@ -154,25 +133,66 @@ class MultiGaussianMesh(GaussianModel):
         pos = (norm_bary.unsqueeze(1) @ face_pos).squeeze(1)                             # [num_gauss, 3 (xyz)
         return pos
 
-    def create_mesh_from_vertices(self, vertices, spatial_lr_scale: float):
+    def from_vertices(self, vertices, spatial_lr_scale: float):
+        self.mesh = compute_mesh(vertices)
+        self._setup_callback(spatial_lr_scale)
 
-        self.make_mesh(vertices)
+    def from_mesh(self, initial_mesh: torch_geometric.data.Data, spatial_lr_scale: float):
+        self.mesh = initial_mesh
+        self._setup_callback(spatial_lr_scale)
+
+    def _setup_callback(self, spatial_lr_scale: float, gaussian_factor=2):
+        self.spatial_lr_scale = spatial_lr_scale
+
+        self.edge_displacement, self.edge_norm = compute_edge_features(self.mesh.pos.clone().detach(),
+                                                                       self.mesh.edge_index.clone().detach())
+        self.mesh.edge_attr = torch.hstack(
+            (self.edge_displacement.clone().detach().to(torch.float32).contiguous(),
+             self.edge_norm.clone().detach().to(torch.float32).contiguous())
+        )
 
         n_faces = self.mesh.face.shape[1]
+        n_gaussians = gaussian_factor * n_faces
+
+        print("Number of faces : ", n_faces)
+        print("Number of nodes : ", self.mesh.pos.shape[0])
+        print("Number of gaussians : ", n_gaussians)
+
+        face_bary = torch.ones((n_gaussians, 3), dtype=torch.float, device="cuda") / 3.0
+        if gaussian_factor > 1:
+            face_bary = torch.clip(torch.normal(face_bary, 0.1), 0.0, 1.0)
+            face_bary = face_bary / face_bary.sum(dim=1, keepdim=True)
 
         self.face_bary = nn.Parameter(
-            ((torch.ones((n_faces, 3), dtype=torch.float, device="cuda")) / 3).requires_grad_(True)
+            face_bary.requires_grad_(True)
         )
+
         self.face_offset = nn.Parameter(
-            torch.zeros(n_faces, 1, dtype=torch.float, device="cuda").requires_grad_(True)
+            torch.zeros(n_gaussians, 1, dtype=torch.float, device="cuda").requires_grad_(True)
         )
-        self.face_ids = torch.arange(0, n_faces, dtype=torch.long, device="cuda")
 
-        shs = np.random.random((n_faces, 3)) / 255.0
+        self.face_ids = torch.arange(0, n_faces, dtype=torch.long, device="cuda").repeat(gaussian_factor).sort().values
 
-        point_coords = self.get_xyz().detach().cpu().numpy()
-        pcd = BasicPointCloud(points=point_coords, colors=SH2RGB(shs), normals=np.zeros((n_faces, 3)))
-        self.create_from_pcd(pcd, spatial_lr_scale)
+        shs = np.random.random((n_gaussians, 3)) / 255.0
+        fused_color = RGB2SH(torch.tensor(np.asarray(shs)).float().cuda())
+        features = torch.zeros((fused_color.shape[0], 3, (self.max_sh_degree + 1) ** 2)).float().cuda()
+        features[:, :3, 0] = fused_color
+        features[:, 3:, 1:] = 0.0
+
+        point_coords = self.get_xyz()
+        dist2 = torch.clamp_min(distCUDA2(point_coords), 0.0000001)
+        scales = torch.log(torch.sqrt(dist2) )[..., None].repeat(1, 3)
+        rots = torch.zeros((n_gaussians, 4), device="cuda")
+        rots[:, 0] = 1
+
+        opacities = inverse_sigmoid(0.1 * torch.ones((n_gaussians, 1), dtype=torch.float, device="cuda"))
+
+        self._features_dc = nn.Parameter(features[:, :, 0:1].transpose(1, 2).contiguous().requires_grad_(True))
+        self._features_rest = nn.Parameter(features[:, :, 1:].transpose(1, 2).contiguous().requires_grad_(True))
+        self._scaling = nn.Parameter(scales.requires_grad_(True))
+        self._rotation = nn.Parameter(rots.requires_grad_(True))
+        self._opacity = nn.Parameter(opacities.requires_grad_(True))
+        self.max_radii2D = torch.zeros((n_gaussians), device="cuda")
 
     def prune_points(self, mask):
 
@@ -193,7 +213,6 @@ class MultiGaussianMesh(GaussianModel):
         self.max_radii2D = self.max_radii2D[valid_points_mask]
 
         self.pos_gradient_accum = self.pos_gradient_accum[valid_points_mask]
-
 
     def densification_postfix(self, new_face_bary, new_face_offset, new_face_ids, new_features_dc, new_features_rest,
                               new_opacities, new_scaling, new_rotation):
@@ -314,19 +333,10 @@ class MultiGaussianMesh(GaussianModel):
 
         self.face_offset = nn.Parameter(torch.tensor(plydata.elements[0]['o'], dtype=torch.float, device='cuda').requires_grad_(True))
 
-        mesh_data = h5py.File(os.path.join(path, 'mesh.hdf5'), 'r')
-        self.mesh = torch_geometric.data.Data(
-            pos=torch.tensor(mesh_data['pos'][:], device='cuda'),
-            norm=torch.tensor(mesh_data['norm'][:], device='cuda'),
-            face=torch.tensor(mesh_data['face'][:], device='cuda'),
-            edge_index=torch.tensor(mesh_data['edge_index'][:], device='cuda'))
-
+        self.mesh = load_mesh_from_h5py(os.path.join(path, 'mesh.hdf5'))
         self.edge_displacement, self.edge_norm = compute_edge_features(self.mesh.pos.clone().detach(),
                                                                        self.mesh.edge_index.clone().detach())
         self.mesh.edge_attr = torch.hstack(
             (self.edge_displacement.clone().detach().to(torch.float32).contiguous(),
              self.edge_norm.clone().detach().to(torch.float32).contiguous())
         )
-
-        self.node_type = torch.full(self.mesh.pos.shape[0:1], fill_value=NodeType.CLOTH, device="cuda")
-

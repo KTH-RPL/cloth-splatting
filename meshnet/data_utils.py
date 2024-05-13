@@ -194,7 +194,14 @@ def compute_edge_features(points, edge_index):
 
     return displacement, norm
 
-
+def load_mesh_from_h5py(path):
+    mesh_data = h5py.File(path, 'r')
+    mesh = torch_geometric.data.Data(
+        pos=torch.tensor(mesh_data['pos'][:], device='cuda'),
+        norm=torch.tensor(mesh_data['norm'][:], device='cuda'),
+        face=torch.tensor(mesh_data['face'][:], device='cuda'),
+        edge_index=torch.tensor(mesh_data['edge_index'][:], device='cuda'))
+    return mesh
 
 if __name__ == '__main__':
     # Load trajectory
