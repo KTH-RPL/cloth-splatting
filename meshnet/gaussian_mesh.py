@@ -11,6 +11,7 @@ from typing import Optional
 
 import h5py
 import numpy
+import roma
 import torch
 import numpy as np
 import torch_geometric.utils
@@ -133,15 +134,27 @@ class MultiGaussianMesh(GaussianModel):
         pos = (norm_bary.unsqueeze(1) @ face_pos).squeeze(1)                             # [num_gauss, 3 (xyz)
         return pos
 
-    def from_vertices(self, vertices, spatial_lr_scale: float):
+    def get_rotation(self, deformed_vertices: Optional[torch.Tensor] = None):
+        rotation = self.rotation_activation(self._rotation)
+        if deformed_vertices is None:
+            return rotation
+        vertice_ids = self.mesh.face[:, self.face_ids].transpose(0, 1)   # [num_gauss, 3 (vert))]
+        vertice_pos = self.mesh.pos[vertice_ids, :]
+        deformed_vertice_pos = deformed_vertices[vertice_ids, :]
+
+        relative_rotation, _ = roma.rigid_points_registration(vertice_pos, deformed_vertice_pos)
+        relative_rotation = roma.rotmat_to_unitquat(relative_rotation)
+        return roma.quat_composition([rotation, relative_rotation])
+
+    def from_vertices(self, vertices, spatial_lr_scale: float, gaussian_init_factor=2):
         self.mesh = compute_mesh(vertices)
-        self._setup_callback(spatial_lr_scale)
+        self._setup_callback(spatial_lr_scale, gaussian_init_factor)
 
-    def from_mesh(self, initial_mesh: torch_geometric.data.Data, spatial_lr_scale: float):
+    def from_mesh(self, initial_mesh: torch_geometric.data.Data, spatial_lr_scale: float, gaussian_init_factor=2):
         self.mesh = initial_mesh
-        self._setup_callback(spatial_lr_scale)
+        self._setup_callback(spatial_lr_scale, gaussian_init_factor)
 
-    def _setup_callback(self, spatial_lr_scale: float, gaussian_factor=2):
+    def _setup_callback(self, spatial_lr_scale: float, gaussian_init_factor=2):
         self.spatial_lr_scale = spatial_lr_scale
 
         self.edge_displacement, self.edge_norm = compute_edge_features(self.mesh.pos.clone().detach(),
@@ -152,15 +165,15 @@ class MultiGaussianMesh(GaussianModel):
         )
 
         n_faces = self.mesh.face.shape[1]
-        n_gaussians = gaussian_factor * n_faces
+        n_gaussians = gaussian_init_factor * n_faces
 
         print("Number of faces : ", n_faces)
         print("Number of nodes : ", self.mesh.pos.shape[0])
         print("Number of gaussians : ", n_gaussians)
 
         face_bary = torch.ones((n_gaussians, 3), dtype=torch.float, device="cuda") / 3.0
-        if gaussian_factor > 1:
-            face_bary = torch.clip(torch.normal(face_bary, 0.1), 0.0, 1.0)
+        if gaussian_init_factor > 1:
+            face_bary = torch.clip(torch.normal(face_bary, 0.05), 0.0, 1.0)
             face_bary = face_bary / face_bary.sum(dim=1, keepdim=True)
 
         self.face_bary = nn.Parameter(
@@ -171,7 +184,7 @@ class MultiGaussianMesh(GaussianModel):
             torch.zeros(n_gaussians, 1, dtype=torch.float, device="cuda").requires_grad_(True)
         )
 
-        self.face_ids = torch.arange(0, n_faces, dtype=torch.long, device="cuda").repeat(gaussian_factor).sort().values
+        self.face_ids = torch.arange(0, n_faces, dtype=torch.long, device="cuda").repeat(gaussian_init_factor).sort().values
 
         shs = np.random.random((n_gaussians, 3)) / 255.0
         fused_color = RGB2SH(torch.tensor(np.asarray(shs)).float().cuda())
@@ -193,6 +206,7 @@ class MultiGaussianMesh(GaussianModel):
         self._rotation = nn.Parameter(rots.requires_grad_(True))
         self._opacity = nn.Parameter(opacities.requires_grad_(True))
         self.max_radii2D = torch.zeros((n_gaussians), device="cuda")
+
 
     def prune_points(self, mask):
 

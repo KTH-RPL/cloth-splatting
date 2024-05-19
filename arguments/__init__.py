@@ -147,6 +147,7 @@ class OptimizationParams(ParamGroup):
         self.static_reconst = False
         self.static_reconst_iteration = 2000
         self.initial_gaussians = 2000
+        self.gaussian_init_factor = 2
         self.no_coarse = False
 
         self.mesh_type = 'multi'

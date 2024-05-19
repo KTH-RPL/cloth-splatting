@@ -20,7 +20,7 @@ In case you want to set up a custom environment, you can use the following comma
 ```
 conda create -n cloth-splatting python=3.10
 conda activate cloth-splatting
-conda install install cuda -c nvidia/label/cuda-12.1.0
+conda install cuda -c nvidia/label/cuda-12.1.0
 ```
 For the torch dependencies we use `torch 2.2.0`.
 ```

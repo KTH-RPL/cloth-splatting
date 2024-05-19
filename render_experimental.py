@@ -11,7 +11,7 @@
 import imageio
 import numpy as np
 import torch
-from scene import Scene
+from meshnet.scene import Scene
 import os
 import cv2
 from tqdm import tqdm
@@ -22,7 +22,7 @@ from utils.general_utils import safe_state
 from argparse import ArgumentParser
 from arguments import ModelParams, PipelineParams, get_combined_args, ModelHiddenParams, MeshnetParams
 from meshnet.gaussian_mesh import GaussianMesh, MultiGaussianMesh
-from meshnet.meshnet import MeshSimulator
+from meshnet.meshnet_network import ResidualMeshSimulator
 from time import time
 import glob 
 import matplotlib.pyplot as plt
@@ -130,7 +130,7 @@ def find_closest_gauss(gt,gauss):
     dists = torch.norm(gt-gauss,dim=-1)
     return torch.argmin(dists,dim=0).cpu().numpy()
 
-def render_set(model_path, name, iteration, views, gaussians: GaussianMesh, simulator: MeshSimulator,
+def render_set(model_path, name, iteration, views, gaussians: GaussianMesh, simulator: ResidualMeshSimulator,
                pipeline, background,log_deform=False, args=None, gt=None):
     render_path = os.path.join(model_path, name, "ours_{}".format(iteration), "renders")
     gts_path = os.path.join(model_path, name, "ours_{}".format(iteration), "gt")
@@ -159,6 +159,7 @@ def render_set(model_path, name, iteration, views, gaussians: GaussianMesh, simu
     prev_time = 0.0
 
     view_id = views[0].view_id
+    time_id = views[0].time_id
 
     arrow_color = (0,255,0)
     arrow_tickness = 1
@@ -222,9 +223,6 @@ def render_set(model_path, name, iteration, views, gaussians: GaussianMesh, simu
         if args.show_flow:
             traj_img = np.zeros((view.image_height,view.image_width,3))
             current_projections = render_pkg["projections"].to("cpu").numpy()[gt_idxs]
-            
-           
-
             gaussian_positions = render_pkg["means3D_deform"].cpu().numpy()[gt_idxs]
             cam_center = view.camera_center.cpu().numpy()
             current_mask, image_mask = get_mask(projections=current_projections,gaussian_positions=gaussian_positions,depth=depth,cam_center=cam_center,
@@ -320,46 +318,41 @@ def render_sets(dataset: ModelParams, hyperparam, iteration: int, pipeline: Pipe
         gt = np.load(gt_path)['traj']
         print("loaded gt from {}".format(gt_path)) 
     with torch.no_grad():
-        gaussians = MultiGaussianMesh(dataset.sh_degree)
-        scene = Scene(dataset, gaussians, load_iteration=iteration, shuffle=False,user_args=user_args)
+        scene = Scene(dataset, load_iteration=iteration, shuffle=False, user_args=user_args)
 
         # load simulator
-        simulator = MeshSimulator(
-            latent_dim=meshnet_params.latent_dim,
-            nmessage_passing_steps=meshnet_params.nmessage_passing_steps,
-            nmlp_layers=meshnet_params.nmlp_layers,
-            mlp_hidden_dim=meshnet_params.mlp_hidden_dim,
-            nnode_in=5,  # node (1) type, position (3) and time (1)
-            nedge_in=4,  # relative positions of node i,j (3) edge norm (1)
-            simulation_dimensions=3,
-            nnode_types=1,  # number of different particle types
-            node_type_embedding_size=1,  # this is one hot encoding for the type, so it is 1 as far as we have 1 type
-            device='cuda')
+        mesh_pos = torch.concat([mesh.pos.unsqueeze(0) for mesh in scene.mesh_predictions], dim=0)
+        simulator = ResidualMeshSimulator(
+            mesh_pos, device='cuda')
+
+        gaussians = MultiGaussianMesh(dataset.sh_degree)
+        gaussians.load_ply(os.path.join(scene.model_path,
+                                        "point_cloud",
+                                        "iteration_" + str(scene.loaded_iter)))
 
         dataset.model_path = args.model_path
 
-
         meshnet_path = meshnet_params.meshnet_path if meshnet_params.meshnet_path != "" else os.path.join(args.model_path, "meshnet")
         if iteration == -1:
-            simulator.load(meshnet_path, meshnet_params.meshnet_file)
+            simulator.load(meshnet_path)
         else:
-            simulator.load(meshnet_path, f"model-{iteration}.pt")
+            simulator.load(os.path.join(meshnet_path, f"model-{iteration}.pt"))
 
         bg_color = [1,1,1] if dataset.white_background else [0, 0, 0]
         background = torch.tensor(bg_color, dtype=torch.float32, device="cuda")
 
         if not skip_train:
-            render_set(dataset.model_path, "train", scene.loaded_iter, scene.getTrainCameras(),
+            render_set(dataset.model_path, "train", scene.loaded_iter, scene.train_cameras,
                        gaussians, simulator, pipeline, background, log_deform=log_deform, args=user_args)
         if not skip_test:
             log_folder = os.path.join(args.model_path, "test", "ours_{}".format(scene.loaded_iter))
             delete_previous_deform_logs(log_folder)
-            render_set(dataset.model_path, "test", scene.loaded_iter, scene.getTestCameras(),
+            render_set(dataset.model_path, "test", scene.loaded_iter, scene.test_cameras,
                        gaussians, simulator, pipeline, background, log_deform=log_deform, args=user_args)
             if user_args.log_deform:
                 merge_deform_logs(log_folder)           
         if not skip_video:
-            render_set(dataset.model_path, "video", scene.loaded_iter, scene.getVideoCameras(),
+            render_set(dataset.model_path, "video", scene.loaded_iter, scene.video_cameras,
                        gaussians, simulator, pipeline, background, log_deform=log_deform, args=user_args)
  
 def delete_previous_deform_logs(folder):

@@ -1,3 +1,5 @@
+from typing import Optional
+
 import torch
 import torch.nn as nn
 import numpy as np
@@ -7,7 +9,6 @@ import os
 
 from meshnet.model_utils import Normalizer
 from meshnet.graph_network import EncodeProcessDecode
-
 
 
 class MeshSimulator(nn.Module):
@@ -94,7 +95,9 @@ class MeshSimulator(nn.Module):
             pass
 
         # embed time
-        node_features.append(time_vector[:, None])
+        if time_vector.dim() == 1:
+            time_vector = time_vector[:, None]
+        node_features.append(time_vector)
 
         # embed integer node_type to onehot vector
         node_type = torch.squeeze(node_type.long())
@@ -248,3 +251,145 @@ class MeshSimulator(nn.Module):
 
         print("Simulator model loaded checkpoint %s"%model_file)
 
+
+class SinusoidalEncoder(torch.nn.Module):
+
+    def __init__(self,
+                 input_dim: int,
+                 num_freqs: int,
+                 min_freq_log2: int = 0,
+                 max_freq_log2: Optional[int] = None,
+                 scale: float = 1.0,
+                 use_identity: bool = True,
+                 device='cpu',
+                 **kwargs):
+        """ A vectorized sinusoidal encoding.
+
+        Args:
+          num_freqs: the number of frequency bands in the encoding.
+          min_freq_log2: the log (base 2) of the lower frequency.
+          max_freq_log2: the log (base 2) of the upper frequency.
+          scale: a scaling factor for the positional encoding.
+          use_identity: if True use the identity encoding as well.
+        """
+        super(SinusoidalEncoder, self).__init__()
+        self.num_freqs = num_freqs
+        self.min_freq_log2 = min_freq_log2
+        self.max_freq_log2 = max_freq_log2 if max_freq_log2 else min_freq_log2 + num_freqs - 1.0
+        self.scale = scale
+        self.use_identity = use_identity
+
+        freq_bands = 2.0 ** torch.linspace(self.min_freq_log2,
+                                            self.max_freq_log2,
+                                            int(self.num_freqs), device=device)
+
+        # (F, 1).
+        self.register_buffer('freqs', torch.reshape(freq_bands, (self.num_freqs, 1)))
+
+        self.input_dim = input_dim
+        self.output_dim = input_dim * self.num_freqs * 2
+        if self.use_identity:
+            self.output_dim += self.input_dim
+
+    def __call__(self, x, alpha: Optional[float] = None):
+        """A vectorized sinusoidal encoding.
+
+        Args:
+          x: the input features to encode.
+          alpha: a dummy argument for API compatibility.
+
+        Returns:
+          A tensor containing the encoded features.
+        """
+        if self.num_freqs == 0:
+            return x
+
+        x_expanded = torch.unsqueeze(x, dim=-2)  # (1, C).
+        # Will be broadcasted to shape (F, C).
+        angles = self.scale * x_expanded * self.freqs
+
+        # The shape of the features is (F, 2, C) so that when we reshape it
+        # it matches the ordering of the original NeRF code.
+        # Vectorize the computation of the high-frequency (sin, cos) terms.
+        # We use the trigonometric identity: cos(x) = sin(x + pi/2)
+        features = torch.stack((angles, angles + torch.pi / 2), dim=-2)
+        features = features.flatten(start_dim=-3, end_dim=-1)
+        features = torch.sin(features)
+
+        # Prepend the original signal for the identity.
+        if self.use_identity:
+            features = torch.cat([x, features], dim=-1)
+        return features
+
+
+class ResidualMeshSimulator(torch.nn.Module):
+
+    def __init__(self,
+                 mesh_predictions: torch.Tensor,
+                 device='cpu'):
+
+        super().__init__()
+        self.mesh_predictions = mesh_predictions.to(device)
+
+        self.n_times = self.mesh_predictions.shape[0]
+        self.time_delta = 1 / (self.n_times - 1)
+
+        n_nodes = self.mesh_predictions.shape[1]
+
+        self.encoder = SinusoidalEncoder(input_dim=1, num_freqs=6, device=device)
+        self.input = torch.nn.Linear(self.encoder.output_dim, 256, device=device)
+        self.hidden = torch.nn.Linear(256, 256, device=device)
+        self.output = torch.nn.Linear(256, n_nodes*3, device=device)
+        nn.init.normal_(self.output.weight, 0.0, 0.001)
+        nn.init.normal_(self.output.bias, 0.0, 0.001)
+
+    def forward(self, time_vector):
+        time = time_vector[0, :]
+        h = self.encoder(time)
+        h = self.input(h)
+        h = torch.nn.functional.relu(h)
+        h = self.hidden(h)
+        h = torch.nn.functional.relu(h)
+        residual_deform = self.output(h).reshape(-1, 3)
+
+        time_id = torch.round(time / self.time_delta).to(dtype=torch.long)
+
+        return self.mesh_predictions[time_id].squeeze() + residual_deform
+
+    def save(self, path):
+        torch.save(self.state_dict(), path)
+
+    def load(self, path):
+        self.load_state_dict(torch.load(path))
+
+
+class ResidualMeshSimulatorEmbedding(torch.nn.Module):
+
+    def __init__(self,
+                 mesh_predictions: torch.Tensor,
+                 device='cpu'):
+
+        super().__init__()
+        self.mesh_predictions = mesh_predictions.to(device)
+
+        self.n_times = self.mesh_predictions.shape[0]
+        self.time_delta = 1 / (self.n_times - 1)
+
+        n_nodes = self.mesh_predictions.shape[1]
+
+        self.embedding = torch.nn.Embedding(self.n_times, n_nodes*3)
+        nn.init.normal_(self.embedding.weight, 0.0, 0.001)
+
+    def forward(self, time_vector):
+        time = time_vector[0, :]
+        time_id = torch.round(time / self.time_delta).to(dtype=torch.long)
+
+        residual_deform = self.embedding(time_id).reshape(-1, 3)
+
+        return self.mesh_predictions[time_id].squeeze() + residual_deform
+
+    def save(self, path):
+        torch.save(self.state_dict(), path)
+
+    def load(self, path):
+        self.load_state_dict(torch.load(path))

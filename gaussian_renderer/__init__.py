@@ -13,13 +13,13 @@ import torch
 import math
 import numpy as np
 from diff_gaussian_rasterization import GaussianRasterizationSettings, GaussianRasterizer
-from meshnet.gaussian_mesh import GaussianMesh
-from meshnet.meshnet_network import MeshSimulator
+from meshnet.gaussian_mesh import MultiGaussianMesh
+from meshnet.meshnet_network import ResidualMeshSimulator
 from utils.sh_utils import eval_sh
 import matplotlib.pyplot as plt
 
 
-def render(viewpoint_camera, pc: GaussianMesh, simulator: MeshSimulator, pipe, bg_color: torch.Tensor, scaling_modifier=1.0,
+def render(viewpoint_camera, pc: MultiGaussianMesh, simulator: ResidualMeshSimulator, pipe, bg_color: torch.Tensor, scaling_modifier=1.0,
            override_color=None, stage="fine", log_deform_path=None, no_shadow=False):
     """
     Render the scene. 
@@ -61,7 +61,7 @@ def render(viewpoint_camera, pc: GaussianMesh, simulator: MeshSimulator, pipe, b
     # add deformation to each points
     # deformation = pc.get_deformation
     means3D = pc.get_xyz()
-        
+
     means2D = screenspace_points
     opacity = pc._opacity
 
@@ -90,23 +90,19 @@ def render(viewpoint_camera, pc: GaussianMesh, simulator: MeshSimulator, pipe, b
         #                                                                  time[deformation_point])        deformation_point
 
         # TODO Implement the shadow scalars
-        scales_deform, opacity_deform, rotations_deform = scales, opacity, rotations
+        scales_deform, opacity_deform = scales, opacity
 
         time = torch.tensor(viewpoint_camera.time).to(pc.mesh.pos.device).repeat(pc.mesh.pos.shape[0], 1)
 
         if viewpoint_camera.time == 0:
-            means3D_deform = pc.mesh.pos
-            means3D_final = pc.get_xyz()
+            means3D_deform = means3D
+            rotations_deform = rotations
         else:
-            means3D_deform = simulator.predict_position(
-                init_positions=pc.mesh.pos,
-                time_vector=time,
-                node_type=pc.node_type,
-                edge_index=pc.mesh.edge_index,
-                edge_features=pc.mesh.edge_attr)
-
-            means3D_final = pc.get_xyz(means3D_deform)
+            vertice_deform = simulator(time_vector=time)
+            means3D_deform = pc.get_xyz(vertice_deform)
+            rotations_deform = pc.get_rotation(vertice_deform)
     rotations_final = rotations_deform
+    means3D_final = means3D_deform
     scales_final = scales_deform
     opacity_final = opacity_deform
 

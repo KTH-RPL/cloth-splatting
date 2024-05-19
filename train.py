@@ -8,44 +8,33 @@
 #
 # For inquiries contact  george.drettakis@inria.fr
 #
-import glob
 
-import numpy as np
+import imageio
 import random
 import os
-import torch
 from random import randint
 
-from meshnet.data_utils import farthest_point_sampling
-from meshnet.dataloader import SamplesClothDataset
-from utils.graphics_utils import BasicPointCloud
 from utils.loss_utils import l1_loss, ssim, l2_loss, lpips_loss
 from gaussian_renderer import render, network_gui
 import sys
-from scene import Scene
+from meshnet.scene import Scene
 
-from meshnet.gaussian_mesh import GaussianMesh, MultiGaussianMesh
-from meshnet.meshnet_network import MeshSimulator
-from train_meshnet import rollout
+from meshnet.gaussian_mesh import MultiGaussianMesh
+from meshnet.meshnet_network import MeshSimulator, ResidualMeshSimulator
 
 from utils.general_utils import safe_state
-import uuid
 from tqdm import tqdm
 from utils.image_utils import psnr
 from argparse import ArgumentParser, Namespace
 from arguments import ModelParams, PipelineParams, OptimizationParams, ModelHiddenParams, MeshnetParams
 from torch.utils.data import DataLoader
 
-from utils.sh_utils import SH2RGB
 from utils.timer import Timer
 from utils.external import *
 import wandb
-# import pytorch3d.transforms as transforms
-import pdb
+
 import lpips
-import open3d as o3d
 from utils.scene_utils import render_training_image
-from time import time
 
 to8b = lambda x: (255 * np.clip(x.cpu().numpy(), 0, 1)).astype(np.uint8)
 
@@ -97,7 +86,7 @@ def flow_loss(all_projections=None, visibility_filter_list=None, viewpoint_cams=
 
 def scene_reconstruction(dataset, opt: OptimizationParams, hyper, pipe, testing_iterations, saving_iterations,
                          checkpoint_iterations, checkpoint, debug_from,
-                         gaussians: GaussianMesh, simulator: MeshSimulator, scene: Scene, stage, tb_writer, train_iter, timer, user_args=None):
+                         gaussians: MultiGaussianMesh, simulator: MeshSimulator, scene: Scene, stage, tb_writer, train_iter, timer, user_args=None):
     first_iter = 0
 
     # Initialize optimizers
@@ -128,7 +117,7 @@ def scene_reconstruction(dataset, opt: OptimizationParams, hyper, pipe, testing_
     progress_bar = tqdm(range(first_iter, final_iter), desc="Training progress")
     first_iter += 1
     lpips_model = lpips.LPIPS(net="alex").cuda()
-    video_cams = scene.getVideoCameras()
+    video_cams = scene.video_cameras
     o3d_knn_dists, o3d_knn_indices, knn_weights = None, None, None
 
     for iteration in range(first_iter, final_iter + 1):
@@ -159,7 +148,7 @@ def scene_reconstruction(dataset, opt: OptimizationParams, hyper, pipe, testing_
 
         # Pick a random Camera
         if not viewpoint_stack:
-            viewpoint_stack = scene.getTrainCameras()
+            viewpoint_stack = scene.train_cameras
             batch_size = 1
             viewpoint_stack_loader = DataLoader(viewpoint_stack, batch_size=batch_size, shuffle=True, num_workers=32,
                                                 collate_fn=list)
@@ -429,10 +418,13 @@ def scene_reconstruction(dataset, opt: OptimizationParams, hyper, pipe, testing_
             # Log and save
             timer.pause()
             training_report(tb_writer, iteration, Ll1, loss, iter_start.elapsed_time(iter_end),
-                            testing_iterations, scene, simulator, [pipe, background], stage, user_args=user_args)
+                            testing_iterations, scene, gaussians, simulator, [pipe, background], stage,
+                            user_args=user_args, save_test_images=user_args.save_test_images)
             if iteration in saving_iterations:
                 print("\n[ITER {}] Saving Gaussians".format(iteration))
-                scene.save(iteration, stage)
+                point_cloud_path = os.path.join(scene.model_path, "point_cloud/iteration_{}".format(iteration))
+                gaussians.save_ply(point_cloud_path)
+
                 meshnet_path = os.path.join(scene.model_path, 'meshnet')
                 os.makedirs(meshnet_path, exist_ok=True)
                 simulator.save(os.path.join(meshnet_path, 'model-' + str(iteration) + '.pt'))
@@ -446,7 +438,7 @@ def scene_reconstruction(dataset, opt: OptimizationParams, hyper, pipe, testing_
                     # total_images.append(to8b(temp_image).transpose(1,2,0))
             timer.start()
             # Densification
-            if iteration < opt.densify_until_iter and not (
+            if iteration < opt.densify_until_iter and (
                     opt.static_reconst and iteration < opt.static_reconst_iteration):
                 # Keep track of max radii in image-space for pruning
                 gaussians.max_radii2D[visibility_filter] = torch.max(gaussians.max_radii2D[visibility_filter],
@@ -480,14 +472,10 @@ def scene_reconstruction(dataset, opt: OptimizationParams, hyper, pipe, testing_
 
             # Optimizer step
             if iteration < opt.iterations:
-                if opt.static_reconst:
-                    if iteration < opt.static_reconst_iteration:
-                        gaussians.optimizer.step()
-                        gaussians.optimizer.zero_grad(set_to_none=True)
-                        meshnet_optimizer.zero_grad()
-                    else:
-                        meshnet_optimizer.step()
-                        meshnet_optimizer.zero_grad()
+                if opt.static_reconst and iteration < opt.static_reconst_iteration:
+                    gaussians.optimizer.step()
+                    gaussians.optimizer.zero_grad(set_to_none=True)
+                    meshnet_optimizer.zero_grad()
                 else:
                     gaussians.optimizer.step()
                     gaussians.optimizer.zero_grad(set_to_none=True)
@@ -500,46 +488,6 @@ def scene_reconstruction(dataset, opt: OptimizationParams, hyper, pipe, testing_
                            os.path.join(scene.model_path, "chkpnt" + str(iteration) + ".pth"))
 
 
-def initial_reconstruction(gaussians, scene, initial_samples, source_path, mesh_type):
-    """
-    Creates the gaussians from the ground truth points from the evaluation set.
-
-    Args:
-        gaussians: The Gaussian object
-        scene:
-        initial_samples:
-        source_path:
-
-    Returns:
-
-    """
-
-    # Find the npz files containing the ground truth points
-    path = glob.glob(os.path.join(source_path, '*_gt_eval.npz'))[0]
-    print(f"Initializing Gaussians with GT points from: {path}")
-
-    dataset = SamplesClothDataset(
-        path,
-        input_length_sequence=1,
-        dt=1,
-        knn=10,
-        delaunay=True,
-        subsample=True,
-        num_samples=initial_samples
-    )
-    node_coords = dataset[0].pos           # (nnode, ndims)
-
-    if mesh_type == 'single':
-        shs = np.random.random((initial_samples, 3)) / 255.0
-        pcd = BasicPointCloud(points=node_coords, colors=SH2RGB(shs), normals=np.zeros((initial_samples, 3)))
-
-        gaussians.create_from_pcd(pcd, scene.cameras_extent)
-    elif mesh_type == 'multi':
-        mesh_vertices = farthest_point_sampling(node_coords, initial_samples)
-        node_coords = torch.tensor(node_coords[mesh_vertices], device='cuda')
-        gaussians.create_mesh_from_vertices(node_coords, scene.cameras_extent)
-
-
 def training(dataset, hyper, opt, pipe, meshnet_params, testing_iterations, saving_iterations, checkpoint_iterations, checkpoint,
              debug_from, expname, user_args=None):
 
@@ -547,40 +495,19 @@ def training(dataset, hyper, opt, pipe, meshnet_params, testing_iterations, savi
     tb_writer = prepare_output_and_logger(expname)
     timer = Timer()
 
-    if opt.mesh_type == 'single':
-        gaussians = GaussianMesh(dataset.sh_degree)
-    elif opt.mesh_type == 'multi':
-        gaussians = MultiGaussianMesh(dataset.sh_degree)
-    else:
-        raise ValueError("Unknown Gaussian Mesh type")
-
-    # load simulator
-    simulator = MeshSimulator(
-        latent_dim=meshnet_params.latent_dim,
-        nmessage_passing_steps=meshnet_params.nmessage_passing_steps,
-        nmlp_layers=meshnet_params.nmlp_layers,
-        mlp_hidden_dim=meshnet_params.mlp_hidden_dim,
-        nnode_in=5,                     # node (1) type, position (3) and time (1)
-        nedge_in=4,                     # relative positions of node i,j (3) edge norm (1)
-        simulation_dimensions=3,
-        nnode_types=1,                  # number of different particle types
-        node_type_embedding_size=1,     # this is one hot encoding for the type, so it is 1 as far as we have 1 type
-        device='cuda')
-    simulator.train()
-
     dataset.model_path = args.model_path
 
-    if meshnet_params.meshnet_path != "":
-        print("Loading pre-trained meshnet!")
-        simulator.load(meshnet_params.meshnet_path, meshnet_params.meshnet_file)
-    else:
-        print("Training meshnet from scratch!")
+    scene = Scene(dataset, load_coarse=None, user_args=user_args)
 
-    scene = Scene(dataset, gaussians, load_coarse=None, user_args=user_args)
+    # load simulator
+    mesh_pos = torch.concat([mesh.pos.unsqueeze(0) for mesh in scene.mesh_predictions], dim=0)
+    simulator = ResidualMeshSimulator(mesh_pos, device='cuda')
+    simulator.train()
+
+    gaussians = MultiGaussianMesh(dataset.sh_degree)
+    gaussians.from_mesh(scene.initial_mesh, scene.cameras_extent, opt.gaussian_init_factor)
 
     timer.start()
-
-    initial_reconstruction(gaussians, scene, opt.initial_gaussians, dataset.source_path, opt.mesh_type)
 
     if not opt.no_coarse:
         scene_reconstruction(dataset, opt, hyper, pipe, testing_iterations, saving_iterations,
@@ -617,8 +544,8 @@ def prepare_output_and_logger(expname):
     return tb_writer
 
 
-def training_report(tb_writer, iteration, Ll1, loss, elapsed, testing_iterations, scene: Scene, simulator: MeshSimulator,
-                    rander_args, stage, user_args=None):
+def training_report(tb_writer, iteration, Ll1, loss, elapsed, testing_iterations, scene: Scene, gaussians: MultiGaussianMesh, simulator: MeshSimulator,
+                    rander_args, stage, user_args=None, save_test_images=True):
     if tb_writer:
         tb_writer.add_scalar(f'{stage}/train_loss_patches/l1_loss', Ll1.item(), iteration)
         tb_writer.add_scalar(f'{stage}/train_loss_patchestotal_loss', loss.item(), iteration)
@@ -628,19 +555,19 @@ def training_report(tb_writer, iteration, Ll1, loss, elapsed, testing_iterations
     if iteration in testing_iterations:
         torch.cuda.empty_cache()
         validation_configs = ({'name': 'test',
-                               'cameras': [scene.getTestCamerasIndividual()[idx % len(scene.getTestCamerasIndividual())]
+                               'cameras': [scene.test_camera_individual[idx % len(scene.test_camera_individual)]
                                            for idx in range(10, 5000, 299)]},
                               {'name': 'train', 'cameras': [
-                                  scene.getTrainCamerasIndividual()[idx % len(scene.getTrainCamerasIndividual())] for
+                                  scene.train_camera_individual[idx % len(scene.train_camera_individual)] for
                                   idx in range(10, 5000, 299)]})
         # individual to get only a single view at a time
-        for config in validation_configs:
+        for config_id, config in enumerate(validation_configs):
             if config['cameras'] and len(config['cameras']) > 0:
                 l1_test = 0.0
                 psnr_test = 0.0
                 for idx, viewpoint in enumerate(config['cameras']):
                     image = torch.clamp(
-                        render(viewpoint, scene.gaussians, simulator, stage=stage, *rander_args, no_shadow=user_args.no_shadow)[
+                        render(viewpoint, gaussians, simulator, stage=stage, *rander_args, no_shadow=user_args.no_shadow)[
                             "render"], 0.0, 1.0)
                     gt_image = torch.clamp(viewpoint.original_image.to("cuda"), 0.0, 1.0)
                     if tb_writer and (idx < 5):
@@ -653,6 +580,17 @@ def training_report(tb_writer, iteration, Ll1, loss, elapsed, testing_iterations
                                 gt_image[None], global_step=iteration)
                     l1_test += l1_loss(image, gt_image).mean().double()
                     psnr_test += psnr(image, gt_image).mean().double()
+
+                    if save_test_images:
+                        save_path = os.path.join(scene.model_path, "test_renders".format(iteration))
+                        os.makedirs(save_path, exist_ok=True)
+                        save_im = np.transpose(gt_image.detach().cpu().numpy(), (1, 2, 0))
+                        save_im = (save_im * 255).astype(np.uint8)
+                        imageio.imsave(os.path.join(save_path, f"{iteration}_{config_id}_gt.png"), save_im)
+                        save_im = np.transpose(image.squeeze().detach().cpu().numpy(), (1, 2, 0))
+                        save_im = (save_im * 255).astype(np.uint8)
+                        imageio.imsave(os.path.join(save_path, f"{iteration}_{config_id}_render.png"), save_im)
+
                 psnr_test /= len(config['cameras'])
                 l1_test /= len(config['cameras'])
 
@@ -665,13 +603,13 @@ def training_report(tb_writer, iteration, Ll1, loss, elapsed, testing_iterations
                     tb_writer.add_scalar(stage + "/" + config['name'] + '/loss_viewpoint - psnr', psnr_test, iteration)
 
         if tb_writer:
-            tb_writer.add_histogram(f"{stage}/scene/opacity_histogram", scene.gaussians.get_opacity, iteration)
+            tb_writer.add_histogram(f"{stage}/scene/opacity_histogram", gaussians.get_opacity, iteration)
 
-            tb_writer.add_scalar(f'{stage}/total_points', scene.gaussians.num_gaussians, iteration)
+            tb_writer.add_scalar(f'{stage}/total_points', gaussians.num_gaussians, iteration)
             #tb_writer.add_scalar(f'{stage}/deformation_rate',
-            #                     scene.gaussians._deformation_table.sum() / scene.gaussians.get_xyz().shape[0], iteration)
+            #                     gaussians._deformation_table.sum() / gaussians.get_xyz().shape[0], iteration)
             #tb_writer.add_histogram(f"{stage}/scene/motion_histogram",
-            #                        scene.gaussians._deformation_accum.mean(dim=-1) / 100, iteration, max_bins=500)
+            #                        gaussians._deformation_accum.mean(dim=-1) / 100, iteration, max_bins=500)
 
         torch.cuda.empty_cache()
 
@@ -701,13 +639,14 @@ if __name__ == "__main__":
     parser.add_argument('--detect_anomaly', action='store_true', default=False)
     parser.add_argument("--test_iterations", nargs="+", type=int, default=[i * 500 for i in range(0, 120)])
     parser.add_argument("--save_iterations", nargs="+", type=int,
-                        default=[2000, 3000, 7_000, 8000, 9000, 14000, 20000, 30_000, 45000, 60000])
+                        default=[1000, 2000, 3000, 7_000, 8000, 9000, 14000, 20000, 30_000, 45000, 60000])
     parser.add_argument("--quiet", action="store_true")
     parser.add_argument("--checkpoint_iterations", nargs="+", type=int, default=[])
     parser.add_argument("--start_checkpoint", type=str, default=None)
     parser.add_argument("--expname", type=str, default="")
     parser.add_argument("--configs", type=str, default="")
     parser.add_argument("--three_steps_batch", type=bool, default=True)
+    parser.add_argument("--save_test_images", type=bool, default=True)
     parser.add_argument("--use_wandb", action="store_true", default=False)
     parser.add_argument("--wandb_project", type=str, default="test_project")
     parser.add_argument("--wandb_name", type=str, default="test_name")
