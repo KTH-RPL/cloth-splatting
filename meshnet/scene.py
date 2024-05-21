@@ -12,7 +12,7 @@
 import os
 import random
 import json
-from typing import NamedTuple
+from typing import NamedTuple, Tuple
 import numpy as np
 
 import torch_geometric.data
@@ -41,7 +41,8 @@ class MeshSceneInfo(NamedTuple):
 
 
 def read_cloth_scene_info(path, white_background, eval, extension=".png", time_skip=None, view_skip=None,
-                          single_cam_video=False):
+                          single_cam_video=False) -> Tuple[
+    MeshSceneInfo, torch_geometric.data.Data, list[torch_geometric.data.Data]]:
     if not os.path.exists(path):
         raise FileNotFoundError("Path does not exist: {}".format(path))
 
@@ -125,9 +126,11 @@ class Scene:
         if user_args.three_steps_batch:
             print("Loading Training Cameras, MDNeRF")
             self.train_cameras = MDNerfDataset(scene_info.train_cameras, args)
+            print("The training view ids are: ", self.train_cameras.viewpoint_ids)
 
             print("Loading Test Cameras, MDNeRF")
             self.test_cameras = MDNerfDataset(scene_info.test_cameras, args)
+            print("The training view ids are: ", self.test_cameras.viewpoint_ids)
         else:
             print("Loading Training Cameras, 4DGS")
             self.train_cameras = FourDGSdataset(scene_info.train_cameras, args)
