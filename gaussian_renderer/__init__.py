@@ -20,7 +20,7 @@ import matplotlib.pyplot as plt
 
 
 def render(viewpoint_camera, pc: MultiGaussianMesh, simulator: ResidualMeshSimulator, pipe, bg_color: torch.Tensor, scaling_modifier=1.0,
-           override_color=None, stage="fine", log_deform_path=None, no_shadow=False):
+           override_color=None, log_deform_path=None, no_shadow=False, render_static=False):
     """
     Render the scene. 
     
@@ -77,30 +77,20 @@ def render(viewpoint_camera, pc: MultiGaussianMesh, simulator: ResidualMeshSimul
         rotations = pc._rotation
     #deformation_point = pc._deformation_table
     shadow_scalars = None
-    if stage == "coarse" :
-        means3D_deform, scales_deform, rotations_deform, opacity_deform = means3D, scales, rotations, opacity
+
+    # TODO Implement the shadow scalars
+    scales_deform, opacity_deform = scales, opacity
+
+    time = torch.tensor(viewpoint_camera.time).to(pc.mesh.pos.device).repeat(pc.mesh.pos.shape[0], 1)
+
+    if render_static:
+        vertices_deform = pc.mesh.pos
+        means3D_deform = means3D
+        rotations_deform = rotations
     else:
-        # means3D_deform, scales_deform, rotations_deform, opacity_deform, shadow_scalars = pc._deformation(means3D[deformation_point], scales[deformation_point], 
-        #                                                                  rotations[deformation_point], opacity[deformation_point],
-        #                                                                  time[deformation_point])
-        # means3D_deform, scales_deform,\
-        # rotations_deform, opacity_deform,\
-        # shadow_scalars = pc._deformation(means3D[deformation_point], scales[deformation_point],
-        #                                                                  rotations[deformation_point], opacity[deformation_point],
-        #                                                                  time[deformation_point])        deformation_point
-
-        # TODO Implement the shadow scalars
-        scales_deform, opacity_deform = scales, opacity
-
-        time = torch.tensor(viewpoint_camera.time).to(pc.mesh.pos.device).repeat(pc.mesh.pos.shape[0], 1)
-
-        if viewpoint_camera.time == 0:
-            means3D_deform = means3D
-            rotations_deform = rotations
-        else:
-            vertice_deform = simulator(time_vector=time)
-            means3D_deform = pc.get_xyz(vertice_deform)
-            rotations_deform = pc.get_rotation(vertice_deform)
+        vertices_deform = simulator(time_vector=time)
+        means3D_deform = pc.get_xyz(vertices_deform)
+        rotations_deform = pc.get_rotation(vertices_deform)
     rotations_final = rotations_deform
     means3D_final = means3D_deform
     scales_final = scales_deform
@@ -191,6 +181,7 @@ def render(viewpoint_camera, pc: MultiGaussianMesh, simulator: ResidualMeshSimul
             "radii": radii,
             "depth":depth,
             "means3D_deform":means3D_final,
+            "vertices_deform": vertices_deform,
             "shadows_mean":shadows_mean,    
             "shadows_std":shadows_std,
             "projections":projections_cam,

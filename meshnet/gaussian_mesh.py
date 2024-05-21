@@ -31,11 +31,6 @@ from meshnet.data_utils import compute_mesh, compute_edge_features, load_mesh_fr
 from meshnet.model_utils import NodeType
 
 from scene.gaussian_model import GaussianModel
-# TODO Add deformation table to GNN
-# TODO Add regularisation terms for GNN
-# TODO Figure out standard constraint function
-# TODO Add lr scheduler for GNN
-# TODO make train_setup function somehow included in the train loop.
 
 
 class GaussianMesh(GaussianModel):
@@ -56,8 +51,8 @@ class GaussianMesh(GaussianModel):
 
         self.mesh = compute_mesh(vertices)
 
-        self.edge_displacement, self.edge_norm = compute_edge_features(self.mesh.pos.clone().detach(),
-                                                                       self.mesh.edge_index.clone().detach())
+        self.edge_displacement, self.edge_norm = compute_edge_features(self.mesh.pos,
+                                                                       self.mesh.edge_index)
         self.mesh.edge_attr = torch.hstack(
             (self.edge_displacement.clone().detach().to(torch.float32).contiguous(),
              self.edge_norm.clone().detach().to(torch.float32).contiguous())
@@ -157,8 +152,7 @@ class MultiGaussianMesh(GaussianModel):
     def _setup_callback(self, spatial_lr_scale: float, gaussian_init_factor=2):
         self.spatial_lr_scale = spatial_lr_scale
 
-        self.edge_displacement, self.edge_norm = compute_edge_features(self.mesh.pos.clone().detach(),
-                                                                       self.mesh.edge_index.clone().detach())
+        self.edge_displacement, self.edge_norm = compute_edge_features(self.mesh.pos, self.mesh.edge_index)
         self.mesh.edge_attr = torch.hstack(
             (self.edge_displacement.clone().detach().to(torch.float32).contiguous(),
              self.edge_norm.clone().detach().to(torch.float32).contiguous())
@@ -207,6 +201,45 @@ class MultiGaussianMesh(GaussianModel):
         self._opacity = nn.Parameter(opacities.requires_grad_(True))
         self.max_radii2D = torch.zeros((n_gaussians), device="cuda")
 
+    import torch
+
+    @torch.no_grad()
+    def cleanup_barycentric_coordinates(self):
+        n_vertices = self.mesh.pos.shape[0]
+        vertices2faces = [torch.nonzero(torch.eq(self.mesh.face, i), as_tuple=False)[:, 1].tolist()
+                          for i in range(n_vertices)]
+
+        affected_mask = self.face_bary < 0
+        affected_coordinates, affected_coordinates_bary = torch.where(affected_mask)
+
+        # Gather the affected face IDs and faces
+        affected_face_ids = self.face_ids[affected_coordinates]
+        affected_faces = self.mesh.face[:, affected_face_ids].transpose(0, 1)
+
+        xyz = self.get_xyz()
+
+        for coord, bary, face, face_id in zip(affected_coordinates, affected_coordinates_bary, affected_faces,
+                                              affected_face_ids):
+            vertice = face[bary]
+
+            other_vertices = face[face != vertice]
+            other_neighbors_0 = vertices2faces[other_vertices[0]]
+            other_neighbors_1 = vertices2faces[other_vertices[1]]
+
+            common_values = set(other_neighbors_0).intersection(set(other_neighbors_1))
+            common_values.discard(face_id.item())  # .item() to ensure it's a scalar
+
+            if not common_values:
+                # If there are no triangle, this mean the gaussian is on the edge of the mesh.
+                # In this case, we will just move the gaussian back to the inside of the mesh.
+                self.face_bary[coord, bary] = 0.005
+                self.face_bary[coord, bary] = self.face_bary[coord, bary] / self.face_bary[coord, bary].sum()
+            else:
+                new_face = list(common_values)[0]
+                self.face_ids[coord] = new_face
+                new_face_vertices = self.mesh.pos[self.mesh.face[:, new_face]]
+                distances = torch.linalg.norm(xyz[coord].unsqueeze(0) - new_face_vertices, dim=1)
+                self.face_bary[coord] = distances / distances.sum()
 
     def prune_points(self, mask):
 

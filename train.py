@@ -14,6 +14,8 @@ import random
 import os
 from random import randint
 
+import torch.linalg
+
 from utils.loss_utils import l1_loss, ssim, l2_loss, lpips_loss
 from gaussian_renderer import render, network_gui
 import sys
@@ -121,6 +123,7 @@ def scene_reconstruction(dataset, opt: OptimizationParams, hyper, pipe, testing_
     o3d_knn_dists, o3d_knn_indices, knn_weights = None, None, None
 
     for iteration in range(first_iter, final_iter + 1):
+        static = opt.static_reconst and iteration < opt.static_reconst_iteration
         if network_gui.conn == None:
             network_gui.try_connect()
         while network_gui.conn != None:
@@ -128,7 +131,7 @@ def scene_reconstruction(dataset, opt: OptimizationParams, hyper, pipe, testing_
                 net_image_bytes = None
                 custom_cam, do_training, pipe.convert_SHs_python, pipe.compute_cov3D_python, keep_alive, scaling_modifer, ts = network_gui.receive()
                 if custom_cam != None:
-                    net_image = render(custom_cam, gaussians, simulator, pipe, background, scaling_modifer, stage="stage")[
+                    net_image = render(custom_cam, gaussians, simulator, pipe, background, scaling_modifer, render_static=static)[
                         "render"]
                     net_image_bytes = memoryview((torch.clamp(net_image, min=0, max=1.0) * 255).byte().permute(1, 2,
                                                                                                                0).contiguous().cpu().numpy())
@@ -164,7 +167,7 @@ def scene_reconstruction(dataset, opt: OptimizationParams, hyper, pipe, testing_
             idx = randint(0, len(viewpoint_stack) - 1)  # picking a random viewpoint
             viewpoint_cams = viewpoint_stack[idx]  # returning 3 subsequence timesteps
 
-        if opt.static_reconst and iteration < opt.static_reconst_iteration:
+        if static:
             viewpoint_cams = [viewpoint_stack.get_one_item(iteration % len(viewpoint_stack), 0)]
 
         # Render
@@ -181,10 +184,12 @@ def scene_reconstruction(dataset, opt: OptimizationParams, hyper, pipe, testing_
         all_opacities = []
         all_shadows = []
         all_shadows_std = []
+        all_vertices_deform = []
 
         for viewpoint_cam in viewpoint_cams:
 
-            render_pkg = render(viewpoint_cam, gaussians, simulator, pipe, background, stage=stage, no_shadow=user_args.no_shadow)
+            render_pkg = render(viewpoint_cam, gaussians, simulator, pipe, background,
+                                no_shadow=user_args.no_shadow, render_static=static)
             image, viewspace_point_tensor, visibility_filter, radii = render_pkg["render"], render_pkg[
                 "viewspace_points"], render_pkg["visibility_filter"], render_pkg["radii"]
             images.append(image.unsqueeze(0))
@@ -195,6 +200,7 @@ def scene_reconstruction(dataset, opt: OptimizationParams, hyper, pipe, testing_
             viewspace_point_tensor_list.append(viewspace_point_tensor)
 
             all_means_3D_deform.append(render_pkg["means3D_deform"][None, :, :])
+            all_vertices_deform.append(render_pkg["vertices_deform"][None, :, :])
             all_projections.append(render_pkg["projections"][None, :, :])
             all_rotations.append(norm_quat(render_pkg["rotations"][None, :, :]))
             all_opacities.append(render_pkg["opacities"][None, :])
@@ -208,6 +214,7 @@ def scene_reconstruction(dataset, opt: OptimizationParams, hyper, pipe, testing_
         all_rotations = torch.cat(all_rotations, 0)
         all_opacities = torch.cat(all_opacities, 0)
         all_means_3D_deform = torch.cat(all_means_3D_deform, 0)
+        all_vertices_deform = torch.cat(all_vertices_deform, 0)
 
         radii = torch.cat(radii_list, 0).max(dim=0).values
         visibility_filter = torch.cat(visibility_filter_list).any(dim=0)
@@ -237,14 +244,20 @@ def scene_reconstruction(dataset, opt: OptimizationParams, hyper, pipe, testing_
         #     l_momentum = torch.linalg.norm(l_momentum, dim=-1, ord=1).mean()  # mean l1 norm
         #
         # l_deformation_mag = 0.0
-        # if n_cams >= 3:
-        #     l_deformation_mag_0 = torch.linalg.norm(all_means_3D_deform[1, :, :] - all_means_3D_deform[0, :, :],
-        #                                             dim=-1).mean()  # mean l2 norm
-        #     l_deformation_mag_1 = torch.linalg.norm(all_means_3D_deform[2, :, :] - all_means_3D_deform[1, :, :],
-        #                                             dim=-1).mean()  # mean l2 norm
-        #
-        #     l_deformation_mag = 0.5 * (l_deformation_mag_0 + l_deformation_mag_1)
-        #
+        if n_cams >= 3:
+            l_deformation_mag_0 = torch.linalg.norm(all_vertices_deform[1, :, :] - all_vertices_deform[0, :, :],
+                                                    dim=-1).mean()  # mean l2 norm
+            l_deformation_mag_1 = torch.linalg.norm(all_vertices_deform[2, :, :] - all_vertices_deform[1, :, :],
+                                                    dim=-1).mean()  # mean l2 norm
+            l_deformation_mag = 0.5 * (l_deformation_mag_0 + l_deformation_mag_1)
+            loss += 0.1 * l_deformation_mag
+
+        if not static:
+            edge_displacement = all_vertices_deform[:, gaussians.mesh.edge_index[1]] - all_vertices_deform[:, gaussians.mesh.edge_index[0]]
+            deformed_norm = torch.linalg.norm(edge_displacement, dim=-1, keepdim=True)
+            static_norm = gaussians.edge_norm.unsqueeze(0).expand(n_cams, -1, -1)
+            l_rigid = torch.nn.functional.l1_loss(static_norm, deformed_norm)
+            loss += 0.1 * l_rigid
         # l_iso, l_rigid, l_shadow_mean, l_shadow_delta, l_spring = None, None, None, None, None
         # diff_dimensions = False
         # if stage == "fine" and iteration > user_args.reg_iter:
@@ -388,6 +401,7 @@ def scene_reconstruction(dataset, opt: OptimizationParams, hyper, pipe, testing_
         #     tv_loss = gaussians.compute_regulation(hyper.time_smoothness_weight, hyper.plane_tv_weight,
         #                                            hyper.l1_time_planes)
         #     loss += tv_loss
+
         if opt.lambda_dssim != 0:
             ssim_loss = ssim(image_tensor, gt_image_tensor)
             loss += opt.lambda_dssim * (1.0 - ssim_loss)
@@ -438,8 +452,7 @@ def scene_reconstruction(dataset, opt: OptimizationParams, hyper, pipe, testing_
                     # total_images.append(to8b(temp_image).transpose(1,2,0))
             timer.start()
             # Densification
-            if iteration < opt.densify_until_iter and (
-                    opt.static_reconst and iteration < opt.static_reconst_iteration):
+            if iteration < opt.densify_until_iter:
                 # Keep track of max radii in image-space for pruning
                 gaussians.max_radii2D[visibility_filter] = torch.max(gaussians.max_radii2D[visibility_filter],
                                                                      radii[visibility_filter])
@@ -470,9 +483,12 @@ def scene_reconstruction(dataset, opt: OptimizationParams, hyper, pipe, testing_
                     print("reset opacity")
                     gaussians.reset_opacity()
 
+            if iteration % opt.bary_cleanup:
+                gaussians.cleanup_barycentric_coordinates()
+
             # Optimizer step
             if iteration < opt.iterations:
-                if opt.static_reconst and iteration < opt.static_reconst_iteration:
+                if static:
                     gaussians.optimizer.step()
                     gaussians.optimizer.zero_grad(set_to_none=True)
                     meshnet_optimizer.zero_grad()
@@ -567,7 +583,7 @@ def training_report(tb_writer, iteration, Ll1, loss, elapsed, testing_iterations
                 psnr_test = 0.0
                 for idx, viewpoint in enumerate(config['cameras']):
                     image = torch.clamp(
-                        render(viewpoint, gaussians, simulator, stage=stage, *rander_args, no_shadow=user_args.no_shadow)[
+                        render(viewpoint, gaussians, simulator, *rander_args, no_shadow=user_args.no_shadow)[
                             "render"], 0.0, 1.0)
                     gt_image = torch.clamp(viewpoint.original_image.to("cuda"), 0.0, 1.0)
                     if tb_writer and (idx < 5):

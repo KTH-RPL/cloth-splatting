@@ -326,7 +326,7 @@ class ResidualMeshSimulator(torch.nn.Module):
 
     def __init__(self,
                  mesh_predictions: torch.Tensor,
-                 device='cpu'):
+                 device='cuda'):
 
         super().__init__()
         self.mesh_predictions = mesh_predictions.to(device)
@@ -337,11 +337,11 @@ class ResidualMeshSimulator(torch.nn.Module):
         n_nodes = self.mesh_predictions.shape[1]
 
         self.encoder = SinusoidalEncoder(input_dim=1, num_freqs=6, device=device)
-        self.input = torch.nn.Linear(self.encoder.output_dim, 256, device=device)
-        self.hidden = torch.nn.Linear(256, 256, device=device)
-        self.output = torch.nn.Linear(256, n_nodes*3, device=device)
-        nn.init.normal_(self.output.weight, 0.0, 0.001)
-        nn.init.normal_(self.output.bias, 0.0, 0.001)
+        self.input = torch.nn.Linear(self.encoder.output_dim, 128, device=device)
+        self.hidden = torch.nn.Linear(128, 128, device=device)
+        self.output = torch.nn.Linear(128, n_nodes*3, device=device)
+        nn.init.normal_(self.output.weight, 0.0, 0.00001)
+        nn.init.normal_(self.output.bias, 0.0, 0.00001)
 
     def forward(self, time_vector):
         time = time_vector[0, :]
