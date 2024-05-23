@@ -19,8 +19,9 @@ from utils.sh_utils import eval_sh
 import matplotlib.pyplot as plt
 
 
-def render(viewpoint_camera, pc: MultiGaussianMesh, simulator: ResidualMeshSimulator, pipe, bg_color: torch.Tensor, scaling_modifier=1.0,
-           override_color=None, log_deform_path=None, no_shadow=False, render_static=False):
+def render(viewpoint_camera, pc: MultiGaussianMesh, simulator: ResidualMeshSimulator, pipe, bg_color: torch.Tensor,
+           scaling_modifier=1.0, override_color=None, log_deform_path=None, no_shadow=False, render_static=False,
+           project_vertices=False):
     """
     Render the scene. 
     
@@ -84,13 +85,13 @@ def render(viewpoint_camera, pc: MultiGaussianMesh, simulator: ResidualMeshSimul
     time = torch.tensor(viewpoint_camera.time).to(pc.mesh.pos.device).repeat(pc.mesh.pos.shape[0], 1)
 
     if render_static:
-        vertices_deform = pc.mesh.pos
+        vertice_deform = pc.mesh.pos
         means3D_deform = means3D
         rotations_deform = rotations
     else:
-        vertices_deform = simulator(time_vector=time)
-        means3D_deform = pc.get_xyz(vertices_deform)
-        rotations_deform = pc.get_rotation(vertices_deform)
+        vertice_deform = simulator(time_vector=time)
+        means3D_deform = pc.get_xyz(vertice_deform)
+        rotations_deform = pc.get_rotation(vertice_deform)
     rotations_final = rotations_deform
     means3D_final = means3D_deform
     scales_final = scales_deform
@@ -108,10 +109,14 @@ def render(viewpoint_camera, pc: MultiGaussianMesh, simulator: ResidualMeshSimul
     # rotations_final[~deformation_point] = rotations[~deformation_point]
     # scales_final[~deformation_point] = scales[~deformation_point]
     # opacity_final[~deformation_point] = opacity[~deformation_point]
-    
+
     if log_deform_path is not None:
-            np.savez(log_deform_path,means3D=means3D.cpu().numpy(),means3D_deform=means3D_final.cpu().numpy(),
-                     rotations=rotations_final.cpu().numpy())
+            np.savez(log_deform_path,
+                     means3D=means3D.cpu().numpy(),
+                     means3D_deform=means3D_final.cpu().numpy(),
+                     vertice_deform=vertice_deform.cpu().numpy(),
+                     rotations=rotations_final.cpu().numpy(),
+                     vertice_rotations=pc.get_vertice_rotation(vertice_deform).cpu().numpy())
             
     scales_final = pc.scaling_activation(scales_final)
     rotations_final = pc.rotation_activation(rotations_final)
@@ -153,20 +158,24 @@ def render(viewpoint_camera, pc: MultiGaussianMesh, simulator: ResidualMeshSimul
         rotations = rotations_final,
         cov3D_precomp = cov3D_precomp)
 
+    def projections(cam, points):
+        points_h = torch.cat([points, torch.ones_like(points[:, 0:1])], dim=1).T
+        cam_transform = cam.full_proj_transform.to(points_h.device).T
+
+        projections = cam_transform.matmul(points_h)
+        projections = projections / projections[3, :]
+
+        projections = projections[:2].T
+        H, W = int(cam.image_height), int(cam.image_width)
+
+        projections_cam = torch.zeros_like(projections).to(projections.device)
+        projections_cam[:, 0] = ((projections[:, 0] + 1.0) * W - 1.0) * 0.5
+        projections_cam[:, 1] = ((projections[:, 1] + 1.0) * H - 1.0) * 0.5
+        return projections_cam
+
     # projecting to cam frame for later use in optic flow
-    means_deform_h = torch.cat([means3D_deform,torch.ones_like(means3D_deform[:,0:1])],dim=1).T 
-    cam_transform = viewpoint_camera.full_proj_transform.to(means_deform_h.device).T
-
-    projections = cam_transform.matmul(means_deform_h)
-    projections = projections/projections[3,:]
-
-    projections = projections[:2].T
-    H, W = int(viewpoint_camera.image_height), int(viewpoint_camera.image_width)
-
-    projections_cam = torch.zeros_like(projections).to(projections.device)
-    projections_cam[:,0] = ((projections[:,0] + 1.0) * W - 1.0) * 0.5
-    projections_cam[:,1] = ((projections[:,1] + 1.0) * H - 1.0) * 0.5
-
+    gaussian_projections = projections(viewpoint_camera, means3D_final)
+    vertice_projections = projections(viewpoint_camera, vertice_deform) if project_vertices else None
     shadows_mean = None
     shadows_std = None
 
@@ -181,12 +190,13 @@ def render(viewpoint_camera, pc: MultiGaussianMesh, simulator: ResidualMeshSimul
             "radii": radii,
             "depth":depth,
             "means3D_deform":means3D_final,
-            "vertices_deform": vertices_deform,
+            "vertice_deform": vertice_deform,
             "shadows_mean":shadows_mean,    
             "shadows_std":shadows_std,
-            "projections":projections_cam,
+            "projections":gaussian_projections,
             "rotations": rotations_deform,
             "opacities": opacity_final,
             "shadows": shadow_scalars,
+            "vertice_projections": vertice_projections,
             }
 

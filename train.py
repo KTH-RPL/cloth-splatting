@@ -184,7 +184,7 @@ def scene_reconstruction(dataset, opt: OptimizationParams, hyper, pipe, testing_
         all_opacities = []
         all_shadows = []
         all_shadows_std = []
-        all_vertices_deform = []
+        all_vertice_deform = []
 
         for viewpoint_cam in viewpoint_cams:
 
@@ -200,7 +200,7 @@ def scene_reconstruction(dataset, opt: OptimizationParams, hyper, pipe, testing_
             viewspace_point_tensor_list.append(viewspace_point_tensor)
 
             all_means_3D_deform.append(render_pkg["means3D_deform"][None, :, :])
-            all_vertices_deform.append(render_pkg["vertices_deform"][None, :, :])
+            all_vertice_deform.append(render_pkg["vertice_deform"][None, :, :])
             all_projections.append(render_pkg["projections"][None, :, :])
             all_rotations.append(norm_quat(render_pkg["rotations"][None, :, :]))
             all_opacities.append(render_pkg["opacities"][None, :])
@@ -214,7 +214,7 @@ def scene_reconstruction(dataset, opt: OptimizationParams, hyper, pipe, testing_
         all_rotations = torch.cat(all_rotations, 0)
         all_opacities = torch.cat(all_opacities, 0)
         all_means_3D_deform = torch.cat(all_means_3D_deform, 0)
-        all_vertices_deform = torch.cat(all_vertices_deform, 0)
+        all_vertice_deform = torch.cat(all_vertice_deform, 0)
 
         radii = torch.cat(radii_list, 0).max(dim=0).values
         visibility_filter = torch.cat(visibility_filter_list).any(dim=0)
@@ -245,15 +245,15 @@ def scene_reconstruction(dataset, opt: OptimizationParams, hyper, pipe, testing_
         #
         # l_deformation_mag = 0.0
         if n_cams >= 3:
-            l_deformation_mag_0 = torch.linalg.norm(all_vertices_deform[1, :, :] - all_vertices_deform[0, :, :],
+            l_deformation_mag_0 = torch.linalg.norm(all_vertice_deform[1, :, :] - all_vertice_deform[0, :, :],
                                                     dim=-1).mean()  # mean l2 norm
-            l_deformation_mag_1 = torch.linalg.norm(all_vertices_deform[2, :, :] - all_vertices_deform[1, :, :],
+            l_deformation_mag_1 = torch.linalg.norm(all_vertice_deform[2, :, :] - all_vertice_deform[1, :, :],
                                                     dim=-1).mean()  # mean l2 norm
             l_deformation_mag = 0.5 * (l_deformation_mag_0 + l_deformation_mag_1)
             loss += 0.1 * l_deformation_mag
 
         if not static:
-            edge_displacement = all_vertices_deform[:, gaussians.mesh.edge_index[1]] - all_vertices_deform[:, gaussians.mesh.edge_index[0]]
+            edge_displacement = all_vertice_deform[:, gaussians.mesh.edge_index[1]] - all_vertice_deform[:, gaussians.mesh.edge_index[0]]
             deformed_norm = torch.linalg.norm(edge_displacement, dim=-1, keepdim=True)
             static_norm = gaussians.edge_norm.unsqueeze(0).expand(n_cams, -1, -1)
             l_rigid = torch.nn.functional.l1_loss(static_norm, deformed_norm)

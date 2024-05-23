@@ -203,6 +203,41 @@ def load_mesh_from_h5py(path):
         edge_index=torch.tensor(mesh_data['edge_index'][:], device='cuda'))
     return mesh
 
+
+def axis_angle_to_quat(axis: torch.Tensor, angle: torch.Tensor) -> torch.Tensor:
+    """
+    Convert axis-angle representation to quaternion.
+    Args:
+        axis: The axis [n, 3]
+        angle: The angle [n]
+
+    Returns: The quaternion [n, 4] (XYZW)
+    """
+    qxyz = axis * torch.sin(angle / 2).unsqueeze(1)
+    qw = torch.cos(angle / 2).unsqueeze(1)
+    return torch.cat([qxyz, qw], dim=1)
+
+
+def vertice_rotation(normals_a: torch.Tensor, normals_b: torch.Tensor) -> torch.Tensor:
+    """
+    Compute the rotation between sets of normals (elemt-wise).
+    Args:
+        normals_a: Initial normals [n, 3]
+        normals_b: Rotated normals [n, 3]
+
+    Returns: The quaternion [n, 4] (XYZW)
+
+    """
+    # Compute cross product to find the rotation axis
+    cross_prod = torch.cross(normals_a, normals_b, dim=1)
+    # Compute the dot product to find the cosine of the angle
+    dot_prod = torch.sum(normals_a * normals_b, dim=1)
+    # Compute the angle between the vectors
+    angles = torch.acos(torch.clamp(dot_prod, -1.0, 1.0))
+    axes = cross_prod / torch.linalg.norm(cross_prod, dim=1, keepdim=True)
+    return axis_angle_to_quat(axes, angles)
+
+
 if __name__ == '__main__':
     # Load trajectory
     traj = load_traj('../data/dataset/final_scene_1_rgb-005/final_scene_1_gt_eval.npz')

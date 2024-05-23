@@ -27,7 +27,7 @@ from simple_knn._C import distCUDA2
 from utils.graphics_utils import BasicPointCloud
 from utils.general_utils import strip_symmetric, build_scaling_rotation
 
-from meshnet.data_utils import compute_mesh, compute_edge_features, load_mesh_from_h5py
+from meshnet.data_utils import compute_mesh, compute_edge_features, load_mesh_from_h5py, vertice_rotation
 from meshnet.model_utils import NodeType
 
 from scene.gaussian_model import GaussianModel
@@ -117,7 +117,15 @@ class MultiGaussianMesh(GaussianModel):
     def num_gaussians(self) -> int:
         return self.face_ids.shape[0]
 
-    def get_xyz(self, deformed_vertices: Optional[torch.Tensor] = None):
+    def get_xyz(self, deformed_vertices: Optional[torch.Tensor] = None) -> torch.Tensor:
+        """
+        Get the xyz coordinates of the mesh gaussians. Either in the default or in a deformed state.
+        Args:
+            deformed_vertices: [num_vertices, 3 (xyz)] Optional deformed vertices of the mesh.
+
+        Returns: [num_gauss, 3 (xyz)] The xyz coordinates of the mesh gaussians.
+
+        """
         vertice_ids = self.mesh.face[:, self.face_ids].transpose(0, 1)   # [num_gauss, 3 (vert))]
         if deformed_vertices is not None:
             assert deformed_vertices.shape[0] == self.mesh.pos.shape[0]
@@ -129,7 +137,14 @@ class MultiGaussianMesh(GaussianModel):
         pos = (norm_bary.unsqueeze(1) @ face_pos).squeeze(1)                             # [num_gauss, 3 (xyz)
         return pos
 
-    def get_rotation(self, deformed_vertices: Optional[torch.Tensor] = None):
+    def get_rotation(self, deformed_vertices: Optional[torch.Tensor] = None) -> torch.Tensor:
+        """
+        Compute the rotation of the mesh gaussians. Either in the default or in a deformed state.
+        Args:
+            deformed_vertices: [num_vertices, 3 (xyz)] Optional deformed vertices of the mesh.
+
+        Returns: [num_vertices, 4 (XYZW)] The rotation of the mesh gaussians as quaternions.
+        """
         rotation = self.rotation_activation(self._rotation)
         if deformed_vertices is None:
             return rotation
@@ -140,6 +155,19 @@ class MultiGaussianMesh(GaussianModel):
         relative_rotation, _ = roma.rigid_points_registration(vertice_pos, deformed_vertice_pos)
         relative_rotation = roma.rotmat_to_unitquat(relative_rotation)
         return roma.quat_composition([rotation, relative_rotation])
+
+    def get_vertice_rotation(self, deformed_vertices) -> torch.Tensor:
+        """
+        Compute the rotation of the vertices of the mesh in a deformed state. Rotation depends on the normals of the
+        surrounding faces.
+        Args:
+            deformed_vertices: [num_vertices, 3 (xyz)] Deformed vertices of the mesh.
+
+        Returns: [num_vertices, 4 (XYZW)] The rotation of the vertices of the mesh in a deformed state as quaternions.
+        """
+        deformed_mesh = torch_geometric.data.Data(pos=deformed_vertices, face=self.mesh.face)
+        deformed_mesh = torch_geometric.transforms.GenerateMeshNormals()(deformed_mesh)
+        return vertice_rotation(self.mesh.norm, deformed_mesh.norm)
 
     def from_vertices(self, vertices, spatial_lr_scale: float, gaussian_init_factor=2):
         self.mesh = compute_mesh(vertices)

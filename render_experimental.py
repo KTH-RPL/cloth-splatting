@@ -32,7 +32,7 @@ import seaborn as sns
 tonumpy = lambda x : x.cpu().numpy()
 to8 = lambda x : np.uint8(np.clip(x,0,1)*255)
 
-def merge_deform_logs(folder):
+def merge_deform_logs(folder, track_vertices=False):
     npz_files = glob.glob(os.path.join(folder,'log_deform_*.npz'),recursive=True)
     # sort based on the float number in the file name
     npz_files.sort(key=lambda f: float(f.split('/')[-1].replace('log_deform_','').replace('.npz','')))
@@ -41,8 +41,12 @@ def merge_deform_logs(folder):
     rotations = []
     for npz_file in npz_files:
         deforms_data = np.load(npz_file)
-        xyzs_deformed = deforms_data['means3D_deform']
-        rotations.append(deforms_data['rotations'])
+        if track_vertices:
+            xyzs_deformed = deforms_data['vertice_deform']
+            rotations.append(deforms_data['vertice_rotations'])
+        else:
+            xyzs_deformed = deforms_data['means3D_deform']
+            rotations.append(deforms_data['rotations'])
         trajs.append(xyzs_deformed)
 
 
@@ -131,7 +135,7 @@ def find_closest_gauss(gt,gauss):
     return torch.argmin(dists,dim=0).cpu().numpy()
 
 def render_set(model_path, name, iteration, views, gaussians: GaussianMesh, simulator: ResidualMeshSimulator,
-               pipeline, background,log_deform=False, args=None, gt=None):
+               pipeline, background,log_deform=False, track_vertices=False, args=None, gt=None):
     render_path = os.path.join(model_path, name, "ours_{}".format(iteration), "renders")
     gts_path = os.path.join(model_path, name, "ours_{}".format(iteration), "gt")
 
@@ -143,12 +147,12 @@ def render_set(model_path, name, iteration, views, gaussians: GaussianMesh, simu
     render_list = []
     
     all_times = [view.time for view in views]
-    n_gaussians = gaussians._xyz.shape[0]
+    n_points = gaussians.mesh.pos.shape[0] if track_vertices else gaussians._xyz.shape[0]
     todo_times = np.unique(all_times)
     n_times = len(todo_times)
     # colors = colormap[np.arange(n_gaussians) % len(colormap)]
-    colors = sns.color_palette(n_colors=n_gaussians)
-    prev_projections = None 
+    colors = sns.color_palette(n_colors=n_points)
+    prev_projections = None
     current_projections = None 
     prev_visible = None
     
@@ -190,7 +194,8 @@ def render_set(model_path, name, iteration, views, gaussians: GaussianMesh, simu
         view.image_width = int(view.image_width * args.scale)
 
         render_pkg = render(view, gaussians, simulator,
-                            pipeline, background, log_deform_path=log_deform_path, no_shadow=args.no_shadow)
+                            pipeline, background, log_deform_path=log_deform_path, no_shadow=args.no_shadow,
+                            project_vertices=track_vertices)
         rendering = tonumpy(render_pkg["render"]).transpose(1, 2, 0)
 
         if opacities is None:
@@ -202,35 +207,36 @@ def render_set(model_path, name, iteration, views, gaussians: GaussianMesh, simu
         depth = render_pkg["depth"].to("cpu").numpy()
             
         depth[depth < depth_dist_threshold] = 10e3  # set small depth to a large value for visualization purposes
-        
+
+        dict_key_deform = 'vertice_deform' if track_vertices else 'means3D_deform'
+        dict_key_projections = 'vertice_projections' if track_vertices else 'projections'
         if gt_idxs is None:
             if gt is not None:
                 gt_t0 = gt[0]
-                gt_idxs = find_closest_gauss(gt_t0,render_pkg["means3D_deform"].cpu().numpy())
-                n_gaussians = gt_idxs.shape[0]
+                gt_idxs = find_closest_gauss(gt_t0,render_pkg[dict_key_deform].cpu().numpy())
             else:
-                gt_idxs = np.arange(n_gaussians)
+                gt_idxs = np.arange(n_points)
         
         if all_trajs is None:
             all_times = np.array([view_time])
-            all_trajs = render_pkg["means3D_deform"][gt_idxs].unsqueeze(0).cpu().numpy()
+            all_trajs = render_pkg[dict_key_deform][gt_idxs].unsqueeze(0).cpu().numpy()
         else:
             all_times = np.concatenate((all_times,np.array([view_time])),axis=0)
-            all_trajs = np.concatenate((all_trajs,render_pkg["means3D_deform"][gt_idxs].unsqueeze(0).cpu().numpy()),axis=0)
+            all_trajs = np.concatenate((all_trajs,render_pkg[dict_key_deform][gt_idxs].unsqueeze(0).cpu().numpy()),axis=0)
         
         
                 
         if args.show_flow:
             traj_img = np.zeros((view.image_height,view.image_width,3))
-            current_projections = render_pkg["projections"].to("cpu").numpy()[gt_idxs]
-            gaussian_positions = render_pkg["means3D_deform"].cpu().numpy()[gt_idxs]
+            current_projections = render_pkg[dict_key_projections].to("cpu").numpy()[gt_idxs]
+            gaussian_positions = render_pkg[dict_key_deform].cpu().numpy()[gt_idxs]
             cam_center = view.camera_center.cpu().numpy()
             current_mask, image_mask = get_mask(projections=current_projections,gaussian_positions=gaussian_positions,depth=depth,cam_center=cam_center,
             height=view.image_height,width=view.image_width)
 
             rendering =  np.ascontiguousarray(rendering)   
             # show scatter on the currently visible gaussians
-            for i in range(n_gaussians)[::args.flow_skip]:
+            for i in range(n_points)[::args.flow_skip]:
                 if current_mask[i] and opacity_mask[i]:
                     color_idx = (i//args.flow_skip) % len(colors)
                     cv2.circle(rendering,(int(current_projections[i,0]),int(current_projections[i,1])),2,colors[color_idx],-1)
@@ -281,7 +287,6 @@ def render_set(model_path, name, iteration, views, gaussians: GaussianMesh, simu
             
         
         render_list.append(rendering)
-            
 
         if name in ["train", "test"]:
             gt = view.original_image[0:3, :, :]
@@ -311,7 +316,8 @@ def render_set(model_path, name, iteration, views, gaussians: GaussianMesh, simu
 
 
 def render_sets(dataset: ModelParams, hyperparam, iteration: int, pipeline: PipelineParams, meshnet_params: MeshnetParams,
-                skip_train: bool, skip_test: bool, skip_video: bool,log_deform=False, user_args=None):
+                skip_train: bool, skip_test: bool, skip_video: bool, log_deform=False, track_vertices=False,
+                user_args=None):
     gt_path = os.path.join(dataset.source_path, "gt.npz")
     gt = None
     if os.path.exists(gt_path):
@@ -343,17 +349,20 @@ def render_sets(dataset: ModelParams, hyperparam, iteration: int, pipeline: Pipe
 
         if not skip_train:
             render_set(dataset.model_path, "train", scene.loaded_iter, scene.train_cameras,
-                       gaussians, simulator, pipeline, background, log_deform=log_deform, args=user_args)
+                       gaussians, simulator, pipeline, background, log_deform=log_deform,
+                       track_vertices=track_vertices, args=user_args)
         if not skip_test:
             log_folder = os.path.join(args.model_path, "test", "ours_{}".format(scene.loaded_iter))
             delete_previous_deform_logs(log_folder)
             render_set(dataset.model_path, "test", scene.loaded_iter, scene.test_cameras,
-                       gaussians, simulator, pipeline, background, log_deform=log_deform, args=user_args)
+                       gaussians, simulator, pipeline, background, log_deform=log_deform,
+                       track_vertices=track_vertices, args=user_args)
             if user_args.log_deform:
-                merge_deform_logs(log_folder)           
+                merge_deform_logs(log_folder, track_vertices=track_vertices)
         if not skip_video:
             render_set(dataset.model_path, "video", scene.loaded_iter, scene.video_cameras,
-                       gaussians, simulator, pipeline, background, log_deform=log_deform, args=user_args)
+                       gaussians, simulator, pipeline, background, log_deform=log_deform,
+                       track_vertices=track_vertices, args=user_args)
  
 def delete_previous_deform_logs(folder):
     npz_files = glob.glob(os.path.join(folder,'log_deform_*.npz'),recursive=True)
@@ -381,8 +390,11 @@ if __name__ == "__main__":
     parser.add_argument("--flow_skip",type=int,default=1)
     parser.add_argument("--no_shadow",action="store_true")
     parser.add_argument("--scale",type=float,default=1.0)
-    parser.add_argument("--single_cam_video",action="store_true",help='Only render from the first camera for the video viz')
+    parser.add_argument("--single_cam_video",action="store_true",
+                        help="Only render from the first camera for the video viz")
     parser.add_argument("--tracking_window",type=int,default=-1)
+    parser.add_argument("--track_vertices", action="store_true",
+                        help="Track the vertices in the scene, otherwise the gaussians are tracked.")
 
     args = get_combined_args(parser)
     print("Rendering " , args.model_path)
@@ -395,4 +407,5 @@ if __name__ == "__main__":
     safe_state(args.quiet)
 
     render_sets(model.extract(args), hyperparam.extract(args), args.iteration, pipeline.extract(args),
-                meshnet_param.extract(args), args.skip_train, args.skip_test, args.skip_video,log_deform=args.log_deform,user_args=args)
+                meshnet_param.extract(args), args.skip_train, args.skip_test, args.skip_video,
+                log_deform=args.log_deform, track_vertices=args.track_vertices, user_args=args)
