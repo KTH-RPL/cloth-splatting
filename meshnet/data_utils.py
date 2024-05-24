@@ -238,6 +238,45 @@ def vertice_rotation(normals_a: torch.Tensor, normals_b: torch.Tensor) -> torch.
     return axis_angle_to_quat(axes, angles)
 
 
+def compute_barycentric_coordinates(points, triangles):
+    """
+    Estimates the barycentric coordinates of a set of points with respect to a set of triangles.
+
+    Args:
+        points: [n, 3 (xyz)] array of points
+        triangles: [m, 3, 3 (xyz)] array of triangles
+
+    Returns: [n, 3] array of barycentric coordinates
+
+    """
+    # Triangles vertices
+    A = triangles[:, 0, :]
+    B = triangles[:, 1, :]
+    C = triangles[:, 2, :]
+
+    # Vectors from A to B and A to C
+    AB = B - A
+    AC = C - A
+    AP = points - A
+
+    # Compute the dot products
+    dot00 = torch.sum(AC * AC, dim=1)
+    dot01 = torch.sum(AC * AB, dim=1)
+    dot02 = torch.sum(AC * AP, dim=1)
+    dot11 = torch.sum(AB * AB, dim=1)
+    dot12 = torch.sum(AB * AP, dim=1)
+
+    # Compute the denominator
+    denom = dot00 * dot11 - dot01 * dot01
+
+    # Compute the barycentric coordinates
+    v = (dot11 * dot02 - dot01 * dot12) / denom
+    w = (dot00 * dot12 - dot01 * dot02) / denom
+    u = 1.0 - v - w
+
+    return torch.stack([u, v, w], dim=1)
+
+
 if __name__ == '__main__':
     # Load trajectory
     traj = load_traj('../data/dataset/final_scene_1_rgb-005/final_scene_1_gt_eval.npz')

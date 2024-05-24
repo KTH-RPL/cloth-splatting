@@ -27,7 +27,8 @@ from simple_knn._C import distCUDA2
 from utils.graphics_utils import BasicPointCloud
 from utils.general_utils import strip_symmetric, build_scaling_rotation
 
-from meshnet.data_utils import compute_mesh, compute_edge_features, load_mesh_from_h5py, vertice_rotation
+from meshnet.data_utils import compute_mesh, compute_edge_features, load_mesh_from_h5py, vertice_rotation, \
+    compute_barycentric_coordinates
 from meshnet.model_utils import NodeType
 
 from scene.gaussian_model import GaussianModel
@@ -326,9 +327,13 @@ class MultiGaussianMesh(GaussianModel):
         means = torch.zeros((stds.size(0), 3), device="cuda")
         samples = torch.normal(mean=means, std=stds)
         rots = build_rotation(self._rotation[selected_pts_mask]).repeat(N, 1, 1)
+        jitter = torch.bmm(rots, samples.unsqueeze(-1)).squeeze(-1)
+        new_xyz = self.get_xyz()[selected_pts_mask].repeat(N, 1) + jitter
+        triangles = self.face_ids[selected_pts_mask]
+        triangle_edges = self.mesh.pos[self.mesh.face[:, triangles]].transpose(0, 1).repeat(N, 1, 1)
+        new_face_bary = compute_barycentric_coordinates(new_xyz, triangle_edges)
 
         new_face_ids = self.face_ids[selected_pts_mask].repeat(N)
-        new_face_bary = torch.bmm(rots, samples.unsqueeze(-1)).squeeze(-1) + self.face_bary[selected_pts_mask].repeat(N, 1)
         new_face_offset = self.face_offset[selected_pts_mask].repeat(N, 1)
         new_scaling = self.scaling_inverse_activation(self.get_scaling[selected_pts_mask].repeat(N, 1) / (0.8 * N))
         new_rotation = self._rotation[selected_pts_mask].repeat(N, 1)
