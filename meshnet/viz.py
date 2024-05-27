@@ -80,7 +80,7 @@ def plot_mesh(points, edges, center_plot=None, white_bkg=False, save_fig=False, 
     plt.show()
     
     
-def plot_mesh_predictions(gt_points, pred_points, edges, center_plot=None, white_bkg=False, save_fig=False, file_name='mesh.png'):
+def plot_mesh_predictions(gt_points, pred_points, edges, center_plot=None, white_bkg=False, save_fig=False, return_image=False, file_name='mesh.png', azim=30, elev=0): 
     fig = plt.figure()
     ax = fig.add_subplot(111, projection='3d')
 
@@ -121,6 +121,8 @@ def plot_mesh_predictions(gt_points, pred_points, edges, center_plot=None, white
     ax.set_ylabel('Y Label')
     ax.set_zlabel('Z Label')
     
+    ax.view_init(elev=elev, azim=azim)
+    
     plt.legend()
 
     if white_bkg:
@@ -129,8 +131,34 @@ def plot_mesh_predictions(gt_points, pred_points, edges, center_plot=None, white
     if save_fig:
         plt.savefig(file_name)  # Save the figure to a file
         plt.close(fig)  # Close the figure to free memory
+    
+    if return_image:
+        canvas = fig.canvas
+        canvas.draw()
+        buf = canvas.buffer_rgba()
+        img = np.asarray(buf)
+        plt.close()
+        return img
+    
     plt.show()
-
+    
+def plot_losses(losses, return_image=False):
+    fig = plt.figure()
+    # make the x axis to start from 1
+    plt.plot(losses)
+    # set range for y axis
+    plt.ylim([0, 0.01])
+    # set x an y titles
+    plt.xlabel('Prediction step')
+    plt.ylabel('Prediction Loss')
+    
+    if return_image:
+        canvas = fig.canvas
+        canvas.draw()
+        buf = canvas.buffer_rgba()
+        img = np.asarray(buf)
+        plt.close()
+        return img
 
 def plot_mesh_and_points(mesh_points, edges, points, 
                          center_plot=None, white_bkg=False, 
@@ -215,6 +243,7 @@ def create_gif(image_paths, gif_path, fps=1):
     images = []
     for filename in image_paths:
         images.append(imageio.imread(filename))
-    imageio.mimsave(gif_path, images, fps=fps)  # fps controls the speed of the GIF
+    imageio.mimwrite(gif_path, images, 'GIF', fps=fps, loop=0)
+    # imageio.mimsave(gif_path, images, fps=fps)  # fps controls the speed of the GIF
     
     

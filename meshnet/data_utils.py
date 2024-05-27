@@ -14,13 +14,49 @@ def load_traj(data_path):
     traj = np.load(data_path, allow_pickle=True)['traj']
     return traj
 
-def load_sim_traj(data_path, load_keys=['pos', 'vel', 'actions', 'trajectory_params', 'gripper_pos', 'pick', 'place']):
+def load_sim_traj(data_path, action_steps=1, load_keys=['pos', 'vel', 'actions', 'trajectory_params', 'gripper_pos', 'pick', 'place']):
     file_path = glob.glob(os.path.join(data_path, '*h5'))[0]
     with h5py.File(file_path, 'r') as f:
-        data = {key: np.array(f[key]) for key in load_keys}
+        if action_steps  == 1:
+            data = {key: np.array(f[key]) for key in load_keys}
+        else:
+            data = {}
+            for key in load_keys:
+                if key in ['trajectory_params', 'pick', 'place']:
+                    data[key] = np.array(f[key])
+                elif key in ['pos', 'vel','gripper_pos',]:
+                    # take one evey action steps
+                    data[key] = np.array(f[key][::action_steps])
+                elif key == 'actions':
+                    # take one evey action steps but sum the actions, 
+                    actions = np.array(f[key])#.reshape(-1, action_steps, 3)
+                    # this code accounts for the scenarios where the number of actions are not divisible by action_steps
+                    if actions.shape[0]%action_steps == 0:
+                        data[key] = actions.reshape(-1, action_steps, 3).sum(1)
+                    else:
+                        last_actions = actions[-(actions.shape[0]%action_steps):].sum(0)[None, :]
+                        pre_actions = actions[:-(actions.shape[0]%action_steps)].reshape(-1, action_steps, 3).sum(1)
+                        data[key] = np.concatenate([pre_actions, last_actions], 0)             
+
     return data
 
-
+def get_env_trajs_path(data_paths):
+    all_trajs = glob.glob(os.path.join(data_paths, '*'))
+    all_trajs.sort()
+    
+    subfolder =  glob.glob(os.path.join(all_trajs[0], '*'))
+    subfolder.sort()
+    # if '.hf' not in  glob.glob(os.path.join(all_trajs[0], '*')):
+    if all(['.h5' not in subfolder for subfolder in glob.glob(os.path.join(all_trajs[0], '*'))]):
+        # expand the list of trajs with all subfolders
+        env_all_trajs = []
+        for traj in all_trajs:
+            new_trajs = glob.glob(os.path.join(traj, '*'))
+            new_trajs.sort()
+            env_all_trajs.append(new_trajs)
+    else:
+        env_all_trajs = [all_trajs]
+    return env_all_trajs
 
 def farthest_point_sampling(points, num_samples):
     """
@@ -51,10 +87,77 @@ def farthest_point_sampling(points, num_samples):
     # Return the selected points
     return selected_indices
 
+def get_data_traj(data_path, load_keys, params, sim_data=False):  
+    dt, k, delaunay, subsample, num_samples, input_length_sequence, action_steps = params             
+    traj_data = load_sim_traj(data_path, action_steps, load_keys)
+    if sim_data:
+        traj_data = flip_trajectory(traj_data, load_keys)
+        
+    traj = traj_data['pos']
+    trajectory_data = process_traj(traj, dt, k, delaunay, 
+                                    subsample=subsample, num_samples=num_samples, 
+                                    sim_data=False, norm_threshold=0.1) # sim_data is false if we flip the trajectory before
+    
+    # shit the actions as we store them as a_t, s_t+1
+    trajectory_data['actions'] = traj_data['actions'][1:]
+    trajectory_data["actions"] = np.concatenate([ np.zeros_like(trajectory_data["actions"][0])[None, :], trajectory_data['actions']],0)
+
+    # gripper data
+    trajectory_data['gripper_pos'] = traj_data['gripper_pos']
+    trajectory_data['gripper_vel'] = (traj_data['gripper_pos'][1:] - traj_data['gripper_pos'][:-1]) / dt
+    trajectory_data["gripper_vel"] = np.concatenate([np.zeros_like(trajectory_data["gripper_vel"][0])[None, :],  trajectory_data['gripper_vel']],0)
+    
+    # useful info
+    trajectory_data['pick'] = traj_data['pick']
+    trajectory_data['place'] = traj_data['place']
+    trajectory_data['trajectory_params'] = traj_data['trajectory_params']   
+    
+    # find at time 0 the particle that is the closest to the grasped one by closest euclidean distance
+    grasped_particle_idx = np.argmin(np.linalg.norm(trajectory_data['pos'][0] - traj_data['pick'], axis=1))
+    # update the node type of the grasped particle
+    trajectory_data['node_type'][:, grasped_particle_idx] = 1
+    
+    trajectory_data['grasped_particle'] = grasped_particle_idx # traj_data['grasped_particle']   
+    
+    if input_length_sequence > 1:
+        for d in ['actions', 'pos', 'velocity', 'gripper_pos', 'gripper_vel', 'node_type', 'edge_index', 'edge_displacement', 'edge_norm']:
+            trajectory_data[d] = expand_init_data(trajectory_data[d], input_length_sequence)
+            
+    return trajectory_data
+            
+def expand_init_data(data, input_length_sequence):
+    # expand the data to have the same length of the input_length_sequence
+    # for the first element of the data
+    for i in range(input_length_sequence - 1):
+        # assert if data is torch or not
+        if isinstance(data, torch.Tensor):
+            data = torch.cat([data[0:1],  data],0)
+        else:
+            data = np.concatenate([data[0:1],  data],0)
+        # data.insert(0, data[0])
+    return data
+                    
+
+def flip_trajectory(traj, load_keys):
+    flip_keys = ['pos', 'vel', 'actions', 'gripper_pos', 'pick', 'place']
+
+    for k in flip_keys:
+        if k in load_keys:
+            if traj[k].ndim == 2:
+                traj[k] = traj[k][:, [0, 2, 1]]
+            elif traj[k].ndim == 3:
+                traj[k] = traj[k][:, :, [0, 2, 1]]
+            else:
+                traj[k] = traj[k][[0, 2, 1]]
+                
+    return traj
+            
+            
 
 
 def process_traj(traj, dt, k=3, delaunay=False, subsample=False, num_samples=300, sim_data=False, norm_threshold=0.01):
     trajectory_data = {"pos": [], "velocity": [], "node_type": [], "edge_index": [], "edge_displacement": [], 'edge_norm': [], 'edge_norm': [], 'edge_faces': []}
+    
 
     if subsample:
         sampled_points_indeces = farthest_point_sampling(traj[0], num_samples)
@@ -146,7 +249,7 @@ def compute_edges_index(points, k=3, delaunay=False, sim_data=False, norm_thresh
         edge_index = np.asarray(list(edges))
         edge_index = torch.tensor(edge_index, dtype=torch.long).t().contiguous()
         # Convert faces list to a tensor
-        faces = torch.tensor(faces, dtype=torch.long).t().contiguous()
+        faces = torch.tensor(np.asarray(faces), dtype=torch.long).t().contiguous()
         return edge_index, faces
     else:
         # Use a k-D tree for efficient nearest neighbors computation

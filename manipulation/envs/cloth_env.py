@@ -2,6 +2,7 @@ import numpy as np
 from gym.spaces import Box
 import pyflex
 from manipulation.envs.gym_env import GymEnv
+from manipulation.utils.eval_utils import get_current_covered_area
 from manipulation.action_space.action_space import Picker, PickerPickPlace, PickerQPG
 from copy import deepcopy
 from pyflex_utils.se3 import SE3Container
@@ -13,7 +14,9 @@ from pyflex_utils.utils import (
     ClothParticleSystem,
     wait_until_scene_is_stable,
     ParticleGrasperObserver,
-    ParticleGrasper
+    ParticleGrasper,
+    # pixel_to_3d_position,
+    # project_3d_to_pixel,
 )
 import pathlib
 import json
@@ -36,7 +39,7 @@ class ClothEnv(GymEnv):
                  num_steps_per_action=1,
                  action_mode="line", 
                  render_mode='cloth', 
-                 picker_radius=0.05, 
+                 picker_radius=0.05,  
                  picker_threshold=0.005,
                  particle_radius=0.00625, 
                  **kwargs):
@@ -130,6 +133,13 @@ class ClothEnv(GymEnv):
 
         with open(os.path.join(output_dir_cam, "camera_params.json"), "w") as f:
             json.dump(camera_params, f)
+            
+    def pixel_to_3d(self, pixel, depth, camera_name='camera_0'):
+        return pixel_to_3d_position(pixel, depth, self.camera_params, camera_name='camera_0')
+    
+    
+    def project_to_image(self, position, camera_name='camera_0'):
+        return project_3d_to_pixel(position, self.camera_params, camera_name='camera_0')
             
     def init_mesh(self, ):
         # TODO: save somewhere these parameters!
@@ -249,6 +259,15 @@ class ClothEnv(GymEnv):
         fold_vector = palce_position - grasp_position
         
         return fold_vector
+    
+    def get_closest_point(self, point):
+        # given a 3D point, we would like to get the closest point in the cloth
+        cloth_points = self.cloth_system.get_positions()
+        distances = np.linalg.norm(cloth_points - point, axis=1)
+        closest_point_idx = np.argmin(distances)
+        return closest_point_idx
+    
+    
 
     def set_scene(self, camera_name=None, state=None):
         if self.render_mode == 'particle':
@@ -347,6 +366,9 @@ class ClothEnv(GymEnv):
     def compute_reward(self, action=None, obs=None, set_prev_reward=False):
         # TODO: do be implemented
         return 0
+    
+    def compute_coverage(self):
+        return get_current_covered_area(self.n_particles, self.cloth_particle_radius)
     
     def _get_obs_old(self):
         if self.observation_mode == 'cam_rgb':

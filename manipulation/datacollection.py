@@ -141,7 +141,7 @@ def full_data_collection(args):
     deformation_config = DeformationConfig()
     
     for c in range(num_cloths):
-        mesh_id = c
+        mesh_id = c + args.start_mesh_id
         target_mesh_path =mesh_paths[mesh_id]
         
         with tqdm(total=num_trajectories, desc=f'Cloth {c+1}/{num_cloths} ({(c/num_cloths)*100:.2f}%)') as pbar:
@@ -188,14 +188,21 @@ if __name__=='__main__':
     parser.add_argument('--headless', type=int, default=1, help='Whether to run the environment with headless rendering')
     parser.add_argument('--save_data', type=int, default=1, help='Whether to save the data')
     parser.add_argument('--save_video_dir', type=str, default='./data/', help='Path to the saved video')
-    parser.add_argument('--img_size', type=int, default=720, help='Size of the recorded videos')
+    parser.add_argument('--img_size', type=int, default=360, help='Size of the recorded videos')
     parser.add_argument('--object', type=str, default='TSHIRT', help='Object to load, choices are TOWEL, TSHIRT, SHORTS')
     parser.add_argument('--flat_mesh_dataset', type=str, default='0411_train', help='Dataset of meshes [dev, 00-final, 0411_test, 0411_train]')
-
-    parser.add_argument('--num_cloths', type=int, default=100, help='Number different cloth in the dataset')
-    parser.add_argument('--num_trajectories', type=int, default=50, help='Number of trajectories to generate per cloth')
+    
+    # parser.add_argument('-start_mesh_id', type=int, default=0, help='Id of the mesh we want to start generating from')
+    # parser.add_argument('--num_cloths', type=int, default=100, help='Number different cloth in the dataset')
+    # parser.add_argument('--num_trajectories', type=int, default=50, help='Number of trajectories to generate per cloth')
+    # parser.add_argument('--dataset_name', type=str, default='train_dataset_0415', help='Name of the dataset')
+    
+    parser.add_argument('-start_mesh_id', type=int, default=0, help='Id of the mesh we want to start generating from')
+    parser.add_argument('--num_cloths', type=int, default=5, help='Number different cloth in the dataset')
+    parser.add_argument('--num_trajectories', type=int, default=10, help='Number of trajectories to generate per cloth')
+    parser.add_argument('--dataset_name', type=str, default='test_dataset_0415', help='Name of the dataset')
+    
     parser.add_argument('--dataset_path', type=str, default='./sim_datasets', help='Name of the dataset')
-    parser.add_argument('--dataset_name', type=str, default='train_dataset_0415', help='Name of the dataset')
     parser.add_argument('--action_mode', type=str, default='circular', help='how to sample the trajectory, still need to implement variations')
     
     args = parser.parse_args()
