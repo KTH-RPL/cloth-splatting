@@ -24,14 +24,6 @@ import pathlib
 #import cv2
 import numpy as np
 
-def modify_bsdf_to_cloth(material: bpy.types.Material) -> bpy.types.Material:
-    bsdf_node = material.node_tree.nodes["Principled BSDF"]
-
-    # Sheen was made for a cloth looks, and fabric is generally not shiny at all.
-    bsdf_node.inputs["Sheen"].default_value = 1.0
-    bsdf_node.inputs["Roughness"].default_value = 1.0
-
-    return material
 
 
 
@@ -97,6 +89,72 @@ def hsv_to_rgb(hsv):
     rgb = np.select(conditions, rgb_arrays, default=np.dstack((v, t, p)))
 
     return rgb
+
+def create_gridded_dish_towel_material(image_path
+) -> bpy.types.Material:
+    # Load the image
+    img = bpy.data.images.load(image_path)
+    
+    # Create a new material
+    material = bpy.data.materials.new(name="ImageBasedMaterial")
+    material.use_nodes = True
+
+    node_tree = material.node_tree
+    nodes = node_tree.nodes
+    links = node_tree.links
+
+    # Clear all nodes to start fresh
+    for node in nodes:
+        nodes.remove(node)
+
+    # Create necessary nodes
+    texture_coordinates = nodes.new(type="ShaderNodeTexCoord")
+    texture_node = nodes.new(type="ShaderNodeTexImage")
+    texture_node.image = img
+    mix_node = nodes.new(type="ShaderNodeMixRGB")
+    principled_bsdf = nodes.new(type="ShaderNodeBsdfPrincipled")
+    output_node = nodes.new(type="ShaderNodeOutputMaterial")
+
+    # Link nodes
+    links.new(texture_coordinates.outputs["UV"], texture_node.inputs["Vector"])
+    links.new(texture_node.outputs["Color"], mix_node.inputs[2])
+    links.new(mix_node.outputs[0], principled_bsdf.inputs["Base Color"])
+    links.new(principled_bsdf.outputs["BSDF"], output_node.inputs["Surface"])
+    return material
+
+
+    
+    
+def get_image_material(image_path):
+    # # Load the image
+    # img = bpy.data.images.load(image_path)
+    
+    # # Create a new material
+    # material = bpy.data.materials.new(name="ImageMaterial")
+    # material.use_nodes = True
+    # nodes = material.node_tree.nodes
+    # links = material.node_tree.links
+
+    # # Create nodes
+    # texture_coordinates = nodes.new(type='ShaderNodeTexCoord')
+    # texture_node = nodes.new(type='ShaderNodeTexImage')
+    # texture_node.image = img
+    # shader_node = nodes.new(type='ShaderNodeBsdfPrincipled')
+    # output_node = nodes.new(type='ShaderNodeOutputMaterial')
+
+    # # Link nodes
+    # links.new(texture_coordinates.outputs['UV'], texture_node.inputs['Vector'])
+    # links.new(texture_node.outputs['Color'], shader_node.inputs['Base Color'])
+    # links.new(shader_node.outputs['BSDF'], output_node.inputs['Surface'])
+    
+    material = bpy.data.materials.new(name="ImageMaterial")
+    material.use_nodes = True
+    bsdf = material.node_tree.nodes["Principled BSDF"]
+    texImage = material.node_tree.nodes.new('ShaderNodeTexImage')
+    texImage.image = bpy.data.images.load(image_path)
+    material.node_tree.links.new(bsdf.inputs['Base Color'], texImage.outputs['Color'])
+    
+    return material
 
 
 @dataclasses.dataclass

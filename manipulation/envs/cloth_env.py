@@ -15,14 +15,15 @@ from pyflex_utils.utils import (
     wait_until_scene_is_stable,
     ParticleGrasperObserver,
     ParticleGrasper,
-    # pixel_to_3d_position,
-    # project_3d_to_pixel,
 )
+from manipulation.envs.camera_utils import get_world_coor_from_image, get_matrix_world_to_camera, intrinsic_from_fov
 import pathlib
 import json
 from manipulation.envs.utils import (
     compute_intrinsics,
-    get_matrix_world_to_camera
+    # get_matrix_world_to_camera,
+    pixel_to_3d_position,
+    project_3d_to_pixel,
 )
 import random
 import os 
@@ -135,11 +136,39 @@ class ClothEnv(GymEnv):
             json.dump(camera_params, f)
             
     def pixel_to_3d(self, pixel, depth, camera_name='camera_0'):
-        return pixel_to_3d_position(pixel, depth, self.camera_params, camera_name='camera_0')
+        cam_params = self.camera_params[camera_name]
+        matrix_world_to_camera = get_matrix_world_to_camera(cam_pos=cam_params['cam_position'], cam_angle=cam_params['cam_angle'])
+        
+        fov = cam_params["cam_fov"]*180/np.pi
+        world_coord = get_world_coor_from_image(pixel[0], pixel[1], depth.shape, matrix_world_to_camera, depth, fov=fov)
+        return world_coord
+        # return pixel_to_3d_position(pixel, depth, self.camera_params, camera_name=camera_name)
     
     
     def project_to_image(self, position, camera_name='camera_0'):
-        return project_3d_to_pixel(position, self.camera_params, camera_name='camera_0')
+        cam_params = self.camera_params[camera_name]
+        matrix_world_to_camera = get_matrix_world_to_camera(cam_pos=cam_params['cam_position'], cam_angle=cam_params['cam_angle'])
+        
+        height, width = cam_params["cam_size"][0], cam_params["cam_size"][1]
+        
+        position = position.reshape(-1, 3)
+        world_coordinate = np.concatenate([position, np.ones((len(position), 1))], axis=1)  # n x 4
+        camera_coordinate = matrix_world_to_camera @ world_coordinate.T  # 3 x n
+        camera_coordinate = camera_coordinate.T  # n x 3
+        fov = cam_params["cam_fov"]*180/np.pi
+        K = intrinsic_from_fov(height, width, fov)  
+
+        u0 = K[0, 2]
+        v0 = K[1, 2]
+        fx = K[0, 0]
+        fy = K[1, 1]
+
+        x, y, depth = camera_coordinate[:, 0], camera_coordinate[:, 1], camera_coordinate[:, 2]
+        u = (x * fx / depth + u0).astype("int")
+        v = (y * fy / depth + v0).astype("int")
+
+        return u, v
+        # return project_3d_to_pixel(position, self.camera_params, camera_name=camera_name)
             
     def init_mesh(self, ):
         # TODO: save somewhere these parameters!

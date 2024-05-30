@@ -17,18 +17,26 @@ if __name__=='__main__':
     parser.add_argument('--frame_end',type=int,default=0,required=False)
     parser.add_argument('-o','--output',type=str,default='output')
     parser.add_argument('-r','--results',help='path to results folder',default='results')
-    parser.add_argument('-d','--depth',type=int,default=0)
     parser.add_argument('--train_poses',help='Give a json file here to manually set poses',type=str,default='./manipulation/asset/pose_jsons/fold_train.json')
     parser.add_argument('--test_poses',help='Give a json file here to manually set poses',type=str,default='./manipulation/asset/pose_jsons/fold_test.json')
     parser.add_argument('-v','--views',type=int,default=12,required=False)
     parser.add_argument('--stop_motion',type=int,default=0,required=False)
     parser.add_argument('-m','--meta',type=str,default='results/splits')
-    parser.add_argument('--format',type=str,choices=['png','exr'],default='png')
+    parser.add_argument('-material_path',type=str,default='/home/omniverse/workspace/cloth-splatting/manipulation/materials/small_red_square.jpg')
     parser.add_argument('--max_n_frames',type=int,default=None)
     parser.add_argument('-fps','--fps',type=int,default=None)
     parser.add_argument('--z_bias',default=None,type=float)
     parser.add_argument('--bg_scene', nargs='?', default=None, help="Path to the scene.blend file")
     parser.add_argument('-split','--split',type=float,default=1.0)
+    
+    
+    # RGB
+    # parser.add_argument('-d','--depth',type=int,default=0)
+    # parser.add_argument('--format',type=str,choices=['png','exr'],default='png')
+    
+    # DEPTYH
+    parser.add_argument('-d','--depth',type=int,default=1)
+    parser.add_argument('--format',type=str,choices=['png','exr'],default='exr')
 
     args = parser.parse_args()    
     

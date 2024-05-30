@@ -195,11 +195,24 @@ def imitate_demo(args):
         
         ################################## Example of pixel to image and inverse ################
         # TO DEBUG, didnt have time to check
-        # depth = obs['rgbd'][:, :, 3]
-        # pixel = (depth.shape[0]//2, depth.shape[1]//2)
-        # position = env.pixel_to_3d(pixel, depth, camera_name='camera_0')        # leave this camera name for now
+        depth = obs['top_view']['rgbd'][:, :, 3]
+        pixel = (depth.shape[0]//2, depth.shape[1]//2)
+        position = env.pixel_to_3d(pixel, depth, camera_name='top_view')        # leave this camera name for now
         
-        # pixel_back = env.project_to_image(position, camera_name='camera_0')
+        pixel_back = env.project_to_image(position, camera_name='top_view')
+        
+        # # plot the image with the pixel_back in red as well
+        plt.imshow(obs['top_view']['rgbd'][:, :, :3]/255.)
+        plt.scatter(pixel_back[0], pixel_back[1], c='r')
+        plt.show()
+        
+        position_keypoint = deepcopy(imitation_data['graph'][0][imitation_data['graph_keypoints_ids'][0], :])
+        # m to mm
+        # position_keypoint /= 1000
+        pixel_keypoint = env.project_to_image(deepcopy(position_keypoint), camera_name='top_view')
+        plt.imshow(obs['top_view']['rgbd'][:, :, :3]/255.)
+        plt.scatter(pixel_keypoint[0], pixel_keypoint[1], c='r')
+        plt.show()
         
         ################################# pick and place selection ################################
         

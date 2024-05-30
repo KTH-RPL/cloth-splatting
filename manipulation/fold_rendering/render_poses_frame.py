@@ -12,7 +12,7 @@ import re
 import pyroexr 
 import copy
 import dataclasses
-from manipulation.materials.cloth_material import modify_bsdf_to_cloth, hsv_to_rgb, sample_hsv_color
+from manipulation.materials.cloth_material import modify_bsdf_to_cloth, hsv_to_rgb, sample_hsv_color, get_image_material
 from manipulation.materials.towels import create_gridded_dish_towel_material
 from manipulation.materials.common import modify_bsdf_to_cloth
 
@@ -328,6 +328,8 @@ def render_poses_frames(args, obj_paths):
     depth_files_split = []
     
     material = generate_towel_material()
+    image_path = args.material_path
+    material = get_image_material(image_path)
     # mesh = bpy.data.objects["_sequence"]
 
     #############################

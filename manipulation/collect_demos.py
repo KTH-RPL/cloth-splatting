@@ -263,7 +263,7 @@ if __name__=='__main__':
     parser.add_argument('--save_data', type=int, default=1, help='Whether to save the data')
     parser.add_argument('--save_video_dir', type=str, default='./data/', help='Path to the saved video')
     parser.add_argument('--img_size', type=int, default=360, help='Size of the recorded videos')
-    parser.add_argument('--object', type=str, default='SHORTS', help='Object to load, choices are TOWEL, TSHIRT, SHORTS')
+    parser.add_argument('--object', type=str, default='TOWEL', help='Object to load, choices are TOWEL, TSHIRT, SHORTS')
     parser.add_argument('--flat_mesh_dataset', type=str, default='0411_train', help='Dataset of meshes [dev, 00-final, 0411_test, 0411_train]')
     
     # parser.add_argument('-start_mesh_id', type=int, default=0, help='Id of the mesh we want to start generating from')
@@ -271,7 +271,7 @@ if __name__=='__main__':
     # parser.add_argument('--num_trajectories', type=int, default=50, help='Number of trajectories to generate per cloth')
     # parser.add_argument('--dataset_name', type=str, default='train_dataset_0415', help='Name of the dataset')
     
-    parser.add_argument('--demo', type=str, default='fold_shorts', help='Name of the dataset. Options: [fold_half, fold_shorts]')
+    parser.add_argument('--demo', type=str, default='fold_half', help='Name of the dataset. Options: [fold_half, fold_shorts]')
     parser.add_argument('-mesh_id', type=int, default=0, help='Id of the mesh we want to use to generating from')
     parser.add_argument('--num_cloths', type=int, default=1, help='Number different cloth in the dataset')
     parser.add_argument('--num_trajectories', type=int, default=1, help='Number of trajectories to generate per cloth')

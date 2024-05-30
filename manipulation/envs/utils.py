@@ -19,7 +19,7 @@ def intrinsic_from_fov(height, width, fov=90):
                      [0, fy, py, 0.],
                      [0, 0, 1., 0.],
                      [0., 0., 0., 1.]])
-
+    
 
 def get_rotation_matrix(angle, axis):
     axis = axis / np.linalg.norm(axis)
@@ -72,6 +72,8 @@ def get_matrix_world_to_camera(cam_pos=[-0.0, 0.82, 0.82], cam_angle=[0, -45 / 1
     translation_matrix[2][3] = - cam_z
 
     return rotation_matrix @ translation_matrix
+
+
 
 import h5py
 import cv2
@@ -138,9 +140,9 @@ def get_world_coords(rgb, depth, matrix_world_to_camera):
     return world_coords
 
 
-
     
 def compute_intrinsics(fov, image_size):
+    # fov is in degrees. Assumed same image size for height and width and same focal length for both
     image_size = float(image_size)
     focal_length = (image_size / 2)\
         / np.tan((np.pi * fov / 180) / 2)
@@ -148,9 +150,10 @@ def compute_intrinsics(fov, image_size):
                      [0, focal_length, image_size / 2],
                      [0, 0, 1]])
 
-def compute_extrinsics(camera_position, camera_angle):
-    camera_position = np.array(camera_position)
-    camera_angle = np.array(camera_angle)
+def compute_extrinsics(cam_pos, cam_angle):
+    # provides the tansformation for world to camera
+    camera_position = np.array(cam_pos)
+    camera_angle = np.array(cam_angle)
     rotation_matrix = SE3Container.from_euler_angles_and_translation(camera_angle).rotation_matrix
     translation = -rotation_matrix @ camera_position
     extrinsics = np.eye(4)
@@ -159,42 +162,167 @@ def compute_extrinsics(camera_position, camera_angle):
     return extrinsics
 
 
-def pixel_to_3d_position(pixel, depth, camera_params, camera_name='camera_0'):
+def transform_points(points, rotation, translation):
     """
-    Convert a pixel position and depth value from camera_0 to a 3D position in the environment.
-    
-    Args:
-    - pixel: A tuple or list with the (x, y) pixel coordinates.
-    - depth: Depth value at the pixel position.
-    - camera_params: Dictionary containing camera parameters for camera_0.
-    
-    Returns:
-    - A numpy array with the 3D position in the environment.
+    Apply a transformation to a set of points given rotation and translation in an efficient way
+    :param points: set of points to be transformed
+    :param rotation: rotation matrix
+    :param translation: translation vector
+    :return: transformed points
     """
-    x, y = pixel
+    # pdb.set_trace()
+    transformation = np.eye(4)
+    transformation[:3, :3] = rotation
+    transformation[:3, 3] = translation
+
+    # Convert to homogeneous coordinates
+    num_points = points.shape[0]
+    points_homogeneous = np.ones((num_points, 4))
+    points_homogeneous[:, :3] = points
+
+    # Apply transformation
+    transformed_points_homogeneous = np.dot(transformation, points_homogeneous.T).T
+
+    # Convert back to 3D
+    transformed_points = transformed_points_homogeneous[:, :3]
+
+    return transformed_points
+
+def pixel_to_3d_position(pixel, depth_image, camera_params, camera_name='camera_0'):
     cam_params = camera_params[camera_name]
-    
     # Compute intrinsic matrix
-    intrinsic = intrinsic_from_fov(cam_params['cam_size'][0], cam_params['cam_size'][1], cam_params['cam_fov'])
-    
+    intrinsic = compute_intrinsics(cam_params['cam_fov'], cam_params['cam_size'][0])
     # Compute extrinsic matrix
-    extrinsic = get_matrix_world_to_camera(cam_pos=cam_params['cam_position'], cam_angle=cam_params['cam_angle'])
+    # extrinsic = get_matrix_world_to_camera(cam_pos=cam_params['cam_position'], cam_angle=cam_params['cam_angle'])
+    extrinsic = compute_extrinsics(cam_pos=cam_params['cam_position'], cam_angle=cam_params['cam_angle'])
     
-    # Inverse intrinsic matrix
-    intrinsic_inv = np.linalg.inv(intrinsic[:3, :3])
     
-    # Convert pixel to normalized camera coordinates
-    pixel_homogeneous = np.array([x, y, 1.0])
-    normalized_camera_coords = depth * (intrinsic_inv @ pixel_homogeneous)
+    # Undistort the RGB image
+    h, w = depth_image.shape[:2]
+    # new_camera_matrix, roi = cv2.getOptimalNewCameraMatrix(K, distortion, (w, h), 1, (w, h))
+    # undistorted_rgb_image = cv2.undistort(rgb_image, K, distortion, None, new_camera_matrix)
+
+    # Generate grid of coordinates
+    u, v = np.meshgrid(np.arange(w), np.arange(h))
+
+    # Flatten the grid to single column vectors
+    u = u.flatten()
+    v = v.flatten()
+
+    # Flatten the depth image to single column vector
+    depth = depth_image.flatten()
+
+    mask_valid = np.ones(depth.shape, dtype=bool)
+
+    # Mask out depth values of zero
+    # valid_depth = (depth > 0) & mask_valid
+    # for now let's take all the points
+    valid_depth = mask_valid
+
+    # Pick only the valid points and colors
+    # pdb.set_trace()
+    u = u[valid_depth]
+    v = v[valid_depth]
+    depth = depth[valid_depth]
+    # colors = rgb_image[v, u]  # Use advanced numpy indexing to get colors
+    # colors = undistorted_rgb_image[v, u]  # Use advanced numpy indexing to get colors
+
+    # Convert depth from uint16 to float and scale it if necessary (e.g., millimeters to meters)
+    depth = depth.astype(np.float32) / 1000.0
+
+    # Reproject to 3D space by applying the inverse of the intrinsic matrix
+    # To speed up, precompute the inversion of the intrinsic matrix
+    # K_inv = np.linalg.inv(K)
+    x = (u - intrinsic[0, 2]) * depth / intrinsic[0, 0]
+    y = (v - intrinsic[1, 2]) * depth / intrinsic[1, 1]
+    z = depth
+
+    # Stack to homogeneous coordinates
+    points_3D = np.vstack((x, y, z)).transpose()
     
-    # Convert normalized camera coordinates to world coordinates
-    normalized_camera_coords_homogeneous = np.append(normalized_camera_coords, 1.0)
-    world_coords = np.linalg.inv(extrinsic) @ normalized_camera_coords_homogeneous
     
-    return world_coords[:3]
+    points_3D_world = transform_points(points_3D, rotation=extrinsic[:3, :3], translation=extrinsic[:3, 3])
+
+    #     points = points_3D
+    points = points_3D_world.reshape((h, w, 3))
+
+    return points[pixel[0], pixel[1]]
 
 
-def project_3d_to_pixel(world_coords, camera_params):
+# def pixel_to_3d_position(pixel, depth, camera_params, camera_name='camera_0'):
+#     """
+#     Convert a pixel position and depth value from camera_0 to a 3D position in the environment.
+    
+#     Args:
+#     - pixel: A tuple or list with the (x, y) pixel coordinates.
+#     - depth: Depth value at the pixel position.
+#     - camera_params: Dictionary containing camera parameters for camera_0.
+    
+#     Returns:
+#     - A numpy array with the 3D position in the environment.
+#     """
+#     x, y = pixel
+#     cam_params = camera_params[camera_name]
+    
+    # # Compute intrinsic matrix
+    # # intrinsic = intrinsic_from_fov(cam_params['cam_size'][0], cam_params['cam_size'][1], cam_params['cam_fov'])
+    # intrinsic = compute_intrinsics(cam_params['cam_fov'], cam_params['cam_size'][0])
+    
+    # # Compute extrinsic matrix
+    # # extrinsic = get_matrix_world_to_camera(cam_pos=cam_params['cam_position'], cam_angle=cam_params['cam_angle'])
+    # extrinsic = compute_extrinsics(cam_pos=cam_params['cam_position'], cam_angle=cam_params['cam_angle'])
+    
+#     # Inverse intrinsic matrix
+#     intrinsic_inv = np.linalg.inv(intrinsic[:3, :3])
+    
+#     # Convert pixel to normalized camera coordinates
+#     pixel_homogeneous = np.array([x, y, 1.0])
+#     normalized_camera_coords = depth[x, y] * (intrinsic_inv @ pixel_homogeneous)
+    
+#     # Convert normalized camera coordinates to world coordinates
+#     normalized_camera_coords_homogeneous = np.append(normalized_camera_coords, 1.0)
+#     world_coords = np.linalg.inv(extrinsic) @ normalized_camera_coords_homogeneous
+    
+#     return world_coords[:3]
+
+# def pixel_to_3d_position(pixel, depth, camera_params, camera_name='camera_0'):
+#     """
+#     Convert a pixel position and depth value from camera_0 to a 3D position in the environment.
+    
+#     Args:
+#     - pixel: A tuple or list with the (x, y) pixel coordinates.
+#     - depth: Depth value at the pixel position.
+#     - camera_params: Dictionary containing camera parameters for camera_0.
+    
+#     Returns:
+#     - A numpy array with the 3D position in the environment.
+#     """
+#     x, y = pixel
+#     cam_params = camera_params[camera_name]
+    
+#     # Compute intrinsic matrix
+#     # intrinsic = intrinsic_from_fov(cam_params['cam_size'][0], cam_params['cam_size'][1], cam_params['cam_fov'])
+#     intrinsic = compute_intrinsics(cam_params['cam_fov'], cam_params['cam_size'][0])
+    
+#     # Compute extrinsic matrix
+#     # extrinsic = get_matrix_world_to_camera(cam_pos=cam_params['cam_position'], cam_angle=cam_params['cam_angle'])
+#     extrinsic = compute_extrinsics(cam_pos=cam_params['cam_position'], cam_angle=cam_params['cam_angle'])
+    
+#     # Inverse intrinsic matrix
+#     intrinsic_inv = np.linalg.inv(intrinsic[:3, :3])
+    
+#     # Convert pixel to normalized camera coordinates
+#     pixel_homogeneous = np.array([x, y, 1.0])
+#     normalized_camera_coords = depth[x, y] * (intrinsic_inv @ pixel_homogeneous)
+    
+#     # Convert normalized camera coordinates to world coordinates
+#     normalized_camera_coords_homogeneous = np.append(normalized_camera_coords, 1.0)
+#     world_coords = np.linalg.inv(extrinsic) @ normalized_camera_coords_homogeneous
+    
+#     return world_coords[:3]
+
+
+def project_3d_to_pixel(world_coords, camera_params, camera_name='camera_0'):
     """
     Project a 3D position in the environment to a pixel position in the image.
     
@@ -205,13 +333,15 @@ def project_3d_to_pixel(world_coords, camera_params):
     Returns:
     - A tuple with the (x, y) pixel coordinates.
     """
-    cam_params = camera_params['camera_0']
+    cam_params = camera_params[camera_name]
     
     # Compute intrinsic matrix
-    intrinsic = intrinsic_from_fov(cam_params['cam_size'][0], cam_params['cam_size'][1], cam_params['cam_fov'])
+    # intrinsic = intrinsic_from_fov(cam_params['cam_size'][0], cam_params['cam_size'][1], cam_params['cam_fov'])
+    intrinsic = compute_intrinsics(cam_params['cam_fov'], cam_params['cam_size'][0])
     
     # Compute extrinsic matrix
-    extrinsic = get_matrix_world_to_camera(cam_pos=cam_params['cam_position'], cam_angle=cam_params['cam_angle'])
+    # extrinsic = get_matrix_world_to_camera(cam_pos=cam_params['cam_position'], cam_angle=cam_params['cam_angle'])
+    extrinsic = compute_extrinsics(cam_pos=cam_params['cam_position'], cam_angle=cam_params['cam_angle'])
     
     # Convert world coordinates to homogeneous coordinates
     world_coords_homogeneous = np.append(world_coords, 1.0)
@@ -220,7 +350,7 @@ def project_3d_to_pixel(world_coords, camera_params):
     camera_coords = extrinsic @ world_coords_homogeneous
     
     # Project camera coordinates to pixel coordinates
-    pixel_coords_homogeneous = intrinsic @ camera_coords[:3]
+    pixel_coords_homogeneous = intrinsic[:3, :3] @ camera_coords[:3]
     
     # Normalize the pixel coordinates
     pixel_coords = pixel_coords_homogeneous[:2] / pixel_coords_homogeneous[2]
