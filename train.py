@@ -146,7 +146,8 @@ def scene_reconstruction(dataset, opt: OptimizationParams, hyper, pipe, testing_
         gaussians.update_learning_rate(iteration)
 
         # Every 1000 its we increase the levels of SH up to a maximum degree
-        if iteration % 100 == 0:
+        # TODO make this a hyperparameter
+        if iteration % 1000 == 0:
             gaussians.oneupSHdegree()
 
         # Pick a random Camera
@@ -185,6 +186,7 @@ def scene_reconstruction(dataset, opt: OptimizationParams, hyper, pipe, testing_
         all_shadows = []
         all_shadows_std = []
         all_vertice_deform = []
+        masks = [] if viewpoint_cams[0].mask is not None else None
 
         for viewpoint_cam in viewpoint_cams:
 
@@ -198,7 +200,8 @@ def scene_reconstruction(dataset, opt: OptimizationParams, hyper, pipe, testing_
             radii_list.append(radii.unsqueeze(0))
             visibility_filter_list.append(visibility_filter.unsqueeze(0))
             viewspace_point_tensor_list.append(viewspace_point_tensor)
-
+            if masks is not None:
+                masks.append(viewpoint_cam.mask.cuda().unsqueeze(0))
             all_means_3D_deform.append(render_pkg["means3D_deform"][None, :, :])
             all_vertice_deform.append(render_pkg["vertice_deform"][None, :, :])
             all_projections.append(render_pkg["projections"][None, :, :])
@@ -220,8 +223,9 @@ def scene_reconstruction(dataset, opt: OptimizationParams, hyper, pipe, testing_
         visibility_filter = torch.cat(visibility_filter_list).any(dim=0)
         image_tensor = torch.cat(images, 0)
         gt_image_tensor = torch.cat(gt_images, 0)
+        mask_tensor = torch.cat(masks, 0) if masks is not None else None
         # Loss
-        Ll1 = l1_loss(image_tensor, gt_image_tensor)
+        Ll1 = l1_loss(image_tensor, gt_image_tensor, mask_tensor)
         # Ll1 = l2_loss(image, gt_image)
 
         psnr_ = psnr(image_tensor, gt_image_tensor).mean().double()
@@ -245,19 +249,20 @@ def scene_reconstruction(dataset, opt: OptimizationParams, hyper, pipe, testing_
         #
         # l_deformation_mag = 0.0
         if n_cams >= 3:
-            l_deformation_mag_0 = torch.linalg.norm(all_vertice_deform[1, :, :] - all_vertice_deform[0, :, :],
-                                                    dim=-1).mean()  # mean l2 norm
-            l_deformation_mag_1 = torch.linalg.norm(all_vertice_deform[2, :, :] - all_vertice_deform[1, :, :],
-                                                    dim=-1).mean()  # mean l2 norm
+            l_deformation_delta_0 = all_vertice_deform[1, :, :] - all_vertice_deform[0, :, :]
+            l_deformation_mag_0 = torch.linalg.norm(l_deformation_delta_0, dim=-1).mean()  # mean l2 norm
+            l_deformation_delta_1 = all_vertice_deform[2, :, :] - all_vertice_deform[1, :, :]
+            l_deformation_mag_1 = torch.linalg.norm(l_deformation_delta_1, dim=-1).mean()  # mean l2 norm
             l_deformation_mag = 0.5 * (l_deformation_mag_0 + l_deformation_mag_1)
-            loss += 0.1 * l_deformation_mag
+            loss += opt.lambda_deform_mag * l_deformation_mag
 
         if not static:
             edge_displacement = all_vertice_deform[:, gaussians.mesh.edge_index[1]] - all_vertice_deform[:, gaussians.mesh.edge_index[0]]
             deformed_norm = torch.linalg.norm(edge_displacement, dim=-1, keepdim=True)
             static_norm = gaussians.edge_norm.unsqueeze(0).expand(n_cams, -1, -1)
             l_rigid = torch.nn.functional.l1_loss(static_norm, deformed_norm)
-            loss += 0.1 * l_rigid
+            loss += opt.lambda_rigid * l_rigid
+
         # l_iso, l_rigid, l_shadow_mean, l_shadow_delta, l_spring = None, None, None, None, None
         # diff_dimensions = False
         # if stage == "fine" and iteration > user_args.reg_iter:
@@ -402,9 +407,14 @@ def scene_reconstruction(dataset, opt: OptimizationParams, hyper, pipe, testing_
         #                                            hyper.l1_time_planes)
         #     loss += tv_loss
 
+        # TODO Double check if SSIM with mask works.
         if opt.lambda_dssim != 0:
-            ssim_loss = ssim(image_tensor, gt_image_tensor)
-            loss += opt.lambda_dssim * (1.0 - ssim_loss)
+            if mask_tensor is None:
+                ssim_loss = ssim(image_tensor, gt_image_tensor)
+                loss += opt.lambda_dssim * (1.0 - ssim_loss)
+            else:
+                ssim_map = ssim(image_tensor, gt_image_tensor, return_map=True)
+                loss += opt.lambda_dssim * ((1.0 - ssim_map) * mask_tensor).mean()
         # if opt.lambda_lpips != 0:
         #     lpipsloss = lpips_loss(image_tensor, gt_image_tensor, lpips_model)
         #     loss += opt.lambda_lpips * lpipsloss
@@ -442,6 +452,10 @@ def scene_reconstruction(dataset, opt: OptimizationParams, hyper, pipe, testing_
                 meshnet_path = os.path.join(scene.model_path, 'meshnet')
                 os.makedirs(meshnet_path, exist_ok=True)
                 simulator.save(os.path.join(meshnet_path, 'model-' + str(iteration) + '.pt'))
+
+                # with open(os.path.join(scene.model_path, "time.txt"), 'a') as file:
+                #     file.write(f"{stage} {iteration} {timer.get_elapsed_time()}\n")
+
             if dataset.render_process:
                 if (iteration < 1000 and iteration % 10 == 1) \
                         or (iteration < 3000 and iteration % 50 == 1) \
@@ -602,10 +616,10 @@ def training_report(tb_writer, iteration, Ll1, loss, elapsed, testing_iterations
                         os.makedirs(save_path, exist_ok=True)
                         save_im = np.transpose(gt_image.detach().cpu().numpy(), (1, 2, 0))
                         save_im = (save_im * 255).astype(np.uint8)
-                        imageio.imsave(os.path.join(save_path, f"{iteration}_{config_id}_gt.png"), save_im)
+                        imageio.imsave(os.path.join(save_path, f"{iteration}_{config['name']}_{config_id}_gt.png"), save_im)
                         save_im = np.transpose(image.squeeze().detach().cpu().numpy(), (1, 2, 0))
                         save_im = (save_im * 255).astype(np.uint8)
-                        imageio.imsave(os.path.join(save_path, f"{iteration}_{config_id}_render.png"), save_im)
+                        imageio.imsave(os.path.join(save_path, f"{iteration}_{config['name']}_{config_id}_render.png"), save_im)
 
                 psnr_test /= len(config['cameras'])
                 l1_test /= len(config['cameras'])
@@ -655,7 +669,7 @@ if __name__ == "__main__":
     parser.add_argument('--detect_anomaly', action='store_true', default=False)
     parser.add_argument("--test_iterations", nargs="+", type=int, default=[i * 500 for i in range(0, 120)])
     parser.add_argument("--save_iterations", nargs="+", type=int,
-                        default=[1000, 2000, 3000, 7_000, 8000, 9000, 14000, 20000, 30_000, 45000, 60000])
+                        default=[1000, 2000, 3000, 4000, 5000, 6000, 8000, 10000])
     parser.add_argument("--quiet", action="store_true")
     parser.add_argument("--checkpoint_iterations", nargs="+", type=int, default=[])
     parser.add_argument("--start_checkpoint", type=str, default=None)
@@ -686,8 +700,6 @@ if __name__ == "__main__":
     # isometric loss
     parser.add_argument("--lambda_isometric", default=0.0, type=float)
 
-    # rigidity loss
-    parser.add_argument("--lambda_rigidity", default=0.0, type=float)
 
     # shadow loss
     parser.add_argument("--lambda_shadow_mean", default=0.0, type=float)
@@ -695,7 +707,6 @@ if __name__ == "__main__":
 
     parser.add_argument("--lambda_momentum_rotation", default=0.0, type=float)
 
-    parser.add_argument("--lambda_deformation_mag", default=0.0, type=float)
     parser.add_argument("--lambda_spring", default=0.0, type=float)
 
     parser.add_argument("--lambda_w", default=2000, type=float)

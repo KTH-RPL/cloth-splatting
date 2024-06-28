@@ -109,7 +109,7 @@ class ModelHiddenParams(ParamGroup):
 class OptimizationParams(ParamGroup):
     def __init__(self, parser):
         self.dataloader=False
-        self.iterations = 30_000
+        self.iterations = 8_000
         self.coarse_iterations = 3000
         self.position_lr_init = 0.00016
         self.position_lr_final = 0.0000016
@@ -126,8 +126,10 @@ class OptimizationParams(ParamGroup):
         self.scaling_lr = 0.005
         self.rotation_lr = 0.001
         self.percent_dense = 0.01
-        self.lambda_dssim = 0
+        self.lambda_dssim = 0.1
         self.lambda_lpips = 0
+        self.lambda_rigid = 0.3
+        self.lambda_deform_mag = 0.01
         self.weight_constraint_init= 1
         self.weight_constraint_after = 0.2
         self.weight_decay_iteration = 5000
@@ -146,7 +148,7 @@ class OptimizationParams(ParamGroup):
 
         self.static_reconst = False
         self.static_reconst_iteration = 2000
-        self.bary_cleanup = 500
+        self.bary_cleanup = 200
         self.initial_gaussians = 2000
         self.gaussian_init_factor = 2
         self.no_coarse = False

@@ -44,6 +44,7 @@ class CameraInfo(NamedTuple):
     view_id: int 
     time_id: int
     flow: np.array = None
+    mask: np.array = None
    
 class SceneInfo(NamedTuple):
     point_cloud: BasicPointCloud
@@ -284,9 +285,17 @@ def readCamerasFromTransforms(path, transformsfile, white_background, extension=
         all_flow = None
         img_paths_flow = None
 
+    mask_path = os.path.join(path, 'masks')
+    if os.path.exists(mask_path):
+        print("Loading masks..")
+    else:
+        mask_path = None
+        mask = None
+
     with open(os.path.join(path, transformsfile)) as json_file:
         contents = json.load(json_file)
         fovx = contents["camera_angle_x"]
+        fovy = contents["camera_angle_y"]
 
         frames = contents["frames"]
         
@@ -298,8 +307,6 @@ def readCamerasFromTransforms(path, transformsfile, white_background, extension=
             
             kept_times = unique_times[::time_skip]
 
-
-        
         for idx, frame in tqdm(enumerate(frames),total=len(frames)):
             
             time = frame["time"]
@@ -339,10 +346,17 @@ def readCamerasFromTransforms(path, transformsfile, white_background, extension=
                 cam_name = os.path.join(path, file_path)
                 # time = mapper[frame["time"]]
                 time = frame["time"]
-                matrix = np.linalg.inv(np.array(frame["transform_matrix"]))
-                R = -np.transpose(matrix[:3,:3])
-                R[:,0] = -R[:,0]
-                T = -matrix[:3, 3]
+
+                # Source: https://github.com/graphdeco-inria/gaussian-splatting/pull/111
+                # NeRF 'transform_matrix' is a camera-to-world transform
+                c2w = np.array(frame["transform_matrix"])
+                # change from OpenGL/Blender camera axes (Y up, Z back) to COLMAP (Y down, Z forward)
+                c2w[:3, 1:3] *= -1
+
+                # get the world-to-camera transform and set R, T
+                w2c = np.linalg.inv(c2w)
+                R = np.transpose(w2c[:3, :3])  # R is stored transposed due to 'glm' in CUDA code
+                T = w2c[:3, 3]
 
                 image_path = os.path.join(path, cam_name)
                 image_name = Path(cam_name).stem
@@ -355,14 +369,19 @@ def readCamerasFromTransforms(path, transformsfile, white_background, extension=
                 norm_data = im_data / 255.0
                 arr = norm_data[:,:,:3] * norm_data[:, :, 3:4] + bg * (1 - norm_data[:, :, 3:4])
                 image = Image.fromarray(np.array(arr*255.0, dtype=np.byte), "RGB")
-                image = PILtoTorch(image,(800,800))
-                fovy = focal2fov(fov2focal(fovx, image.shape[1]), image.shape[2])
-                FovY = fovy 
+                image = PILtoTorch(image,None)
+
+                if mask_path:
+                    masks_file_path = os.path.join(mask_path, image_name + ".png")
+                    mask = Image.open(masks_file_path)
+                    mask = 1.0 - PILtoTorch(mask, None)
+
+                FovY = fovy
                 FovX = fovx
 
                 cam_infos.append(CameraInfo(uid=idx, R=R, T=T, FovY=FovY, FovX=FovX, image=image,
                                 image_path=image_path, image_name=image_name, width=image.shape[1], height=image.shape[2],
-                                time = time,view_id=view_id,time_id=time_id,flow=flow))
+                                time = time,view_id=view_id,time_id=time_id,flow=flow, mask=mask))
     return cam_infos
 def read_timeline(path):
     with open(os.path.join(path, "transforms_train.json")) as json_file:

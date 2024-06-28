@@ -27,12 +27,15 @@ OptimizationParams = dict(
     position_lr_init=0.00016,
     position_lr_final=0.00000016,
     position_lr_delay_mult=0.1,
-    position_lr_max_steps=5500,
+    position_lr_max_steps=6500,
     feature_lr=0.00025,
 
     position_lr_static=0.0016,
     static_reconst=True,
-    static_reconst_iteration=1500,
+    static_reconst_iteration=2500,
+
+    lambda_rigid=0.5,
+    iterations=8000
 )
 
 ModelParams = dict(
