@@ -81,14 +81,39 @@ class GaussianMesh(GaussianModel):
         self.make_mesh(self.get_xyz())
 
 
+def initialize_gaussians(n_gaussians, sh_degree):
+    shs = np.random.random((n_gaussians, 3)) / 255.0
+    fused_color = RGB2SH(torch.tensor(np.asarray(shs)).float().cuda())
+    features = torch.zeros((fused_color.shape[0], 3, (sh_degree + 1) ** 2)).float().cuda()
+    features[:, :3, 0] = fused_color
+    features[:, 3:, 1:] = 0.0
+
+    features_dc = features[:, :, 0:1].transpose(1, 2).contiguous()
+    features_rest = features[:, :, 1:].transpose(1, 2).contiguous()
+
+    features[:, :, 0:1].transpose(1, 2).contiguous()
+
+    face_bary = torch.ones((n_gaussians, 3), dtype=torch.float, device="cuda") / 3.0
+    face_bary = torch.clip(torch.normal(face_bary, 0.05), 0.0, 1.0)
+    face_bary = face_bary / face_bary.sum(dim=1, keepdim=True)
+
+    rots = torch.zeros((n_gaussians, 4), device="cuda")
+    rots[:, 0] = 1
+
+    opacities = inverse_sigmoid(0.1 * torch.ones((n_gaussians, 1), dtype=torch.float, device="cuda"))
+
+    return face_bary, features_dc, features_rest, rots, opacities
+
+
 class MultiGaussianMesh(GaussianModel):
 
     def __init__(self, sh_degree: int):
         super().__init__(sh_degree)
 
-        self.face_bary = torch.empty(0)          # [n_gaussians, 3]
-        self.face_ids = torch.empty(0)           # [n_gaussians, 3]
-        self.face_offset = torch.empty(0)        # [n_gaussians, 1]       # TODO Implement face offset
+        self.face_vertices_pos = None
+        self.face_bary = torch.empty(0)  # [n_gaussians, 3]
+        self.face_ids = torch.empty(0)  # [n_gaussians, 3]
+        self.face_offset = torch.empty(0)  # [n_gaussians, 1]       # TODO Implement face offset
 
         self.edge_displacement = torch.empty(0)
         self.edge_norm = torch.empty(0)
@@ -114,9 +139,15 @@ class MultiGaussianMesh(GaussianModel):
                                                     lr_final=training_args.position_lr_final * self.spatial_lr_scale,
                                                     lr_delay_mult=training_args.position_lr_delay_mult,
                                                     max_steps=training_args.position_lr_max_steps)
+
     @property
     def num_gaussians(self) -> int:
         return self.face_ids.shape[0]
+
+    @property
+    def face_vertice_pos(self):
+        face_vertices = self.mesh.face[:, self.face_ids].transpose(0, 1)
+        return self.mesh.pos[face_vertices]
 
     def get_xyz(self, deformed_vertices: Optional[torch.Tensor] = None) -> torch.Tensor:
         """
@@ -127,15 +158,15 @@ class MultiGaussianMesh(GaussianModel):
         Returns: [num_gauss, 3 (xyz)] The xyz coordinates of the mesh gaussians.
 
         """
-        vertice_ids = self.mesh.face[:, self.face_ids].transpose(0, 1)   # [num_gauss, 3 (vert))]
+        vertice_ids = self.mesh.face[:, self.face_ids].transpose(0, 1)  # [num_gauss, 3 (vert))]
         if deformed_vertices is not None:
             assert deformed_vertices.shape[0] == self.mesh.pos.shape[0]
             face_pos = deformed_vertices[vertice_ids, :]
         else:
-            face_pos = self.mesh.pos[vertice_ids, :]                            # [num_gauss, 3 (vert), 3 (xyz)]
+            face_pos = self.mesh.pos[vertice_ids, :]  # [num_gauss, 3 (vert), 3 (xyz)]
 
-        norm_bary = self.face_bary / self.face_bary.sum(dim=1, keepdim=True)             # [num_gauss, 3 (bary)]
-        pos = (norm_bary.unsqueeze(1) @ face_pos).squeeze(1)                             # [num_gauss, 3 (xyz)
+        norm_bary = self.face_bary / self.face_bary.sum(dim=1, keepdim=True)  # [num_gauss, 3 (bary)]
+        pos = (norm_bary.unsqueeze(1) @ face_pos).squeeze(1)  # [num_gauss, 3 (xyz)
         return pos
 
     def get_rotation(self, deformed_vertices: Optional[torch.Tensor] = None) -> torch.Tensor:
@@ -149,7 +180,7 @@ class MultiGaussianMesh(GaussianModel):
         rotation = self.rotation_activation(self._rotation)
         if deformed_vertices is None:
             return rotation
-        vertice_ids = self.mesh.face[:, self.face_ids].transpose(0, 1)   # [num_gauss, 3 (vert))]
+        vertice_ids = self.mesh.face[:, self.face_ids].transpose(0, 1)  # [num_gauss, 3 (vert))]
         vertice_pos = self.mesh.pos[vertice_ids, :]
         deformed_vertice_pos = deformed_vertices[vertice_ids, :]
 
@@ -207,7 +238,8 @@ class MultiGaussianMesh(GaussianModel):
             torch.zeros(n_gaussians, 1, dtype=torch.float, device="cuda").requires_grad_(True)
         )
 
-        self.face_ids = torch.arange(0, n_faces, dtype=torch.long, device="cuda").repeat(gaussian_init_factor).sort().values
+        self.face_ids = torch.arange(0, n_faces, dtype=torch.long, device="cuda").repeat(
+            gaussian_init_factor).sort().values
 
         shs = np.random.random((n_gaussians, 3)) / 255.0
         fused_color = RGB2SH(torch.tensor(np.asarray(shs)).float().cuda())
@@ -217,7 +249,7 @@ class MultiGaussianMesh(GaussianModel):
 
         point_coords = self.get_xyz()
         dist2 = torch.clamp_min(distCUDA2(point_coords), 0.0000001)
-        scales = torch.log(torch.sqrt(dist2) )[..., None].repeat(1, 3)
+        scales = torch.log(torch.sqrt(dist2))[..., None].repeat(1, 3)
         rots = torch.zeros((n_gaussians, 4), device="cuda")
         rots[:, 0] = 1
 
@@ -234,10 +266,22 @@ class MultiGaussianMesh(GaussianModel):
 
     @torch.no_grad()
     def cleanup_barycentric_coordinates(self):
+        """
+        Cleanup the barycentric coordinates of the gaussians. This means re-assigning all Gaussians which have moved
+         out of their assigned face to the face they are actually located in.
+         This is done by checking the barycentric coordinates of the gaussians and checking if they are negative which
+         indicates that the gaussian is outside the face.
+         The new face must be the face where to other two vertices (which still have positive barycentric coordinates)
+         of are part of.
+
+        Returns:
+
+        """
         n_vertices = self.mesh.pos.shape[0]
         vertices2faces = [torch.nonzero(torch.eq(self.mesh.face, i), as_tuple=False)[:, 1].tolist()
                           for i in range(n_vertices)]
 
+        # Negative baricentric coordinates indicate that the gaussian is outside the face.
         affected_mask = self.face_bary < 0
         affected_coordinates, affected_coordinates_bary = torch.where(affected_mask)
 
@@ -249,13 +293,21 @@ class MultiGaussianMesh(GaussianModel):
 
         for coord, bary, face, face_id in zip(affected_coordinates, affected_coordinates_bary, affected_faces,
                                               affected_face_ids):
+
+            # The vertice of the face which is responsible for the negative barycentric coordinate
             vertice = face[bary]
 
+            # Get the other two vertices of the face
             other_vertices = face[face != vertice]
+
+            # For the other two vertices, get the faces they are part of.
             other_neighbors_0 = vertices2faces[other_vertices[0]]
             other_neighbors_1 = vertices2faces[other_vertices[1]]
 
+            # Get the common faces of the two vertices
             common_values = set(other_neighbors_0).intersection(set(other_neighbors_1))
+
+            # Remove the current face from the common faces. Which only leaves the face the gaussian is now actually in.
             common_values.discard(face_id.item())  # .item() to ensure it's a scalar
 
             if not common_values:
@@ -269,6 +321,18 @@ class MultiGaussianMesh(GaussianModel):
                 new_face_vertices = self.mesh.pos[self.mesh.face[:, new_face]]
                 distances = torch.linalg.norm(xyz[coord].unsqueeze(0) - new_face_vertices, dim=1)
                 self.face_bary[coord] = distances / distances.sum()
+
+    def populate_empty_faces(self):
+        # TODO Use this method somewhere
+
+        all_face_ids = torch.arange(0, self.mesh.face.shape[1], device="cuda")
+        empty_faces = torch.where(~torch.isin(all_face_ids, self.face_ids))[0]
+        if empty_faces.shape[0] == 0:
+            return
+        n_gaussians = empty_faces.shape[0]
+        face_bary, features, rots, opacity = initialize_gaussians(n_gaussians, self.max_sh_degree)
+
+        self.densification_postfix(face_bary, torch.zeros((n_gaussians, 1), device="cuda"), empty_faces, features)
 
     def prune_points(self, mask):
 
@@ -390,7 +454,8 @@ class MultiGaussianMesh(GaussianModel):
         dtype_full = [(attribute, 'f4') for attribute in self.construct_list_of_attributes()]
 
         elements = np.empty(face_ids.shape[0], dtype=dtype_full)
-        attributes = np.concatenate((xyz, normals, f_dc, f_rest, opacities, scale, rotation, face_bary, face_offset, face_ids), axis=1)
+        attributes = np.concatenate(
+            (xyz, normals, f_dc, f_rest, opacities, scale, rotation, face_bary, face_offset, face_ids), axis=1)
         elements[:] = list(map(tuple, attributes))
         el = PlyElement.describe(elements, 'vertex')
         PlyData([el]).write(save_path)
@@ -408,10 +473,11 @@ class MultiGaussianMesh(GaussianModel):
 
         face_bary = np.stack((np.asarray(plydata.elements[0]['b1']),
                               np.asarray(plydata.elements[0]['b2']),
-                                    np.asarray(plydata.elements[0]['b3'])), axis=1)
+                              np.asarray(plydata.elements[0]['b3'])), axis=1)
         self.face_bary = nn.Parameter(torch.tensor(face_bary, dtype=torch.float, device='cuda').requires_grad_(True))
 
-        self.face_offset = nn.Parameter(torch.tensor(plydata.elements[0]['o'], dtype=torch.float, device='cuda').requires_grad_(True))
+        self.face_offset = nn.Parameter(
+            torch.tensor(plydata.elements[0]['o'], dtype=torch.float, device='cuda').requires_grad_(True))
 
         self.mesh = load_mesh_from_h5py(os.path.join(path, 'mesh.hdf5'))
         self.edge_displacement, self.edge_norm = compute_edge_features(self.mesh.pos.clone().detach(),
