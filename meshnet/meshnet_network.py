@@ -330,18 +330,20 @@ class ResidualMeshSimulator(torch.nn.Module):
 
         super().__init__()
         self.mesh_predictions = mesh_predictions.to(device)
+        # replace all predictions by the first mesh (used for ablation studies)
+        # self.mesh_predictions = self.mesh_predictions[0].unsqueeze(0).repeat(self.mesh_predictions.shape[0], 1, 1)
 
         self.n_times = self.mesh_predictions.shape[0]
-        self.time_delta = 1 / (self.n_times - 1)
+        self.time_delta = 1.0 / (self.n_times - 1)
 
         n_nodes = self.mesh_predictions.shape[1]
 
         self.encoder = SinusoidalEncoder(input_dim=1, num_freqs=6, device=device)
-        self.input = torch.nn.Linear(self.encoder.output_dim, 128, device=device)
-        self.hidden = torch.nn.Linear(128, 128, device=device)
-        self.output = torch.nn.Linear(128, n_nodes*3, device=device)
+        self.input = torch.nn.Linear(self.encoder.output_dim, 256, device=device)
+        self.hidden = torch.nn.Linear(256, 256, device=device)
+        self.output = torch.nn.Linear(256, n_nodes*3, device=device)
         nn.init.normal_(self.output.weight, 0.0, 0.00001)
-        nn.init.normal_(self.output.bias, 0.0, 0.00001)
+        nn.init.normal_(self.output.bias, 0.0, 0.000001)
 
     def forward(self, time_vector):
         time = time_vector[0, :]
@@ -353,7 +355,8 @@ class ResidualMeshSimulator(torch.nn.Module):
         residual_deform = self.output(h).reshape(-1, 3)
 
         time_id = torch.round(time / self.time_delta).to(dtype=torch.long)
-
+        if time_id >= self.n_times:
+            raise ValueError(f"Time {time} is out of bounds for the mesh simulator.")
         return self.mesh_predictions[time_id].squeeze() + residual_deform
 
     def save(self, path):
@@ -393,3 +396,4 @@ class ResidualMeshSimulatorEmbedding(torch.nn.Module):
 
     def load(self, path):
         self.load_state_dict(torch.load(path))
+
