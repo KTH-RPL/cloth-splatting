@@ -66,10 +66,12 @@ def viz_traj(ax,gt_traj,traj):
 parser = argparse.ArgumentParser()
 parser.add_argument("--gt_file",type=str,required=True)
 parser.add_argument("--traj_file",type=str,required=True)
+parser.add_argument("--keyword",type=str, default="traj")
+
 args = parser.parse_args()
 
 gt_data = np.load(args.gt_file)
-gt_traj = gt_data['traj']
+gt_traj = gt_data[args.keyword]
 print('Gt traj: {}'.format(gt_traj.shape))
 
 

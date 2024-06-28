@@ -1,10 +1,18 @@
-export RIGIDITY_LAMBDA=0.1
-export LAMBDA_SPRING=0.0
-export LAMBDA_ISOMETRIC=0.3
+export TEST_ITER=6000
+#!/bin/bash
 
-python3 train.py -s data/final_scenes/scene_1/ --port 6021 --expname "final_scenes/scene_1" --configs arguments/mdnerf-dataset/cube.py --lambda_w 100000 --lambda_rigidity $RIGIDITY_LAMBDA --lambda_spring $LAMBDA_SPRING --lambda_momentum 0.1 --use_wandb --wandb_project final_scene_1 --wandb_name init --k_nearest 5 --lambda_isometric $LAMBDA_ISOMETRIC
-python3 train.py -s data/final_scenes/scene_2/ --port 6022 --expname "final_scenes/scene_2" --configs arguments/mdnerf-dataset/cube.py --lambda_w 100000 --lambda_rigidity $RIGIDITY_LAMBDA --lambda_spring $LAMBDA_SPRING --lambda_momentum 0.1 --use_wandb --wandb_project final_scene_2 --wandb_name init --k_nearest 5 --lambda_isometric $LAMBDA_ISOMETRIC
-python3 train.py -s data/final_scenes/scene_3/ --port 6023 --expname "final_scenes/scene_3" --configs arguments/mdnerf-dataset/cube.py --lambda_w 100000 --lambda_rigidity $RIGIDITY_LAMBDA --lambda_spring $LAMBDA_SPRING  --lambda_momentum 0.1 --use_wandb --wandb_project final_scene_3 --wandb_name init --k_nearest 5 --lambda_isometric $LAMBDA_ISOMETRIC
-python3 train.py -s data/final_scenes/scene_4/ --port 6024 --expname "final_scenes/scene_4" --configs arguments/mdnerf-dataset/cube.py --lambda_w 100000 --lambda_rigidity $RIGIDITY_LAMBDA --lambda_spring $LAMBDA_SPRING  --lambda_momentum 0.1 --use_wandb --wandb_project final_scene_4 --wandb_name init --k_nearest 5 --lambda_isometric $LAMBDA_ISOMETRIC
-python3 train.py -s data/final_scenes/scene_5/ --port 6025 --expname "final_scenes/scene_5" --configs arguments/mdnerf-dataset/cube.py --lambda_w 100000 --lambda_rigidity $RIGIDITY_LAMBDA --lambda_spring $LAMBDA_SPRING  --lambda_momentum 0.1 --use_wandb --wandb_project final_scene_5 --wandb_name init --k_nearest 5 --lambda_isometric $LAMBDA_ISOMETRIC
-python3 train.py -s data/final_scenes/scene_6/ --port 6026 --expname "final_scenes/scene_6" --configs arguments/mdnerf-dataset/cube.py --lambda_w 100000 --lambda_rigidity $RIGIDITY_LAMBDA --lambda_spring $LAMBDA_SPRING  --lambda_momentum 0.1 --use_wandb --wandb_project final_scene_6 --wandb_name init --k_nearest 5 --lambda_isometric $LAMBDA_ISOMETRIC
+#rm -r output/full_run
+mkdir -p output/full_run
+for SCENE in "TOWEL_00_03" "TSHIRT_01_00" "TSHIRT_01_01" "SHORTS_01_00" "SHORTS_01_01"
+do
+    EXP="full_run/${SCENE}"
+    DATA=data/folding_scenes/${SCENE}
+#    python3 train.py -s ${DATA} --expname "${EXP}" --configs arguments/cloth_splatting/default.py --view_skip 3 --iterations 6000
+    python3 render_experimental.py -s ${DATA} --model_path "output/${EXP}" \
+      --configs "arguments/cloth_splatting/default.py"  --meshnet_path "output/${EXP}/meshnet"\
+      --show_flow --log_deform --track_vertices --skip_train --skip_video --iteration ${TEST_ITER} --flow_skip 2
+    python3 scripts/align_eval_trajs.py  --gt_file "${DATA}/trajectory.npz" --traj_file "output/${EXP}/test/ours_${TEST_ITER}/all_trajs.npz"
+    mkdir -p output/full_run/tracking/${SCENE}
+    python3 scripts/extract_aligned_trajs.py \
+    --src_dir "output/${EXP}" --target_dir output/full_run/tracking/${SCENE} --iteration ${TEST_ITER} --target_name cloth-splatting.npz
+done
