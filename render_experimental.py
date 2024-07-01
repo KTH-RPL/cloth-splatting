@@ -278,7 +278,7 @@ def render_set(model_path, name, iteration, views, gaussians: GaussianMesh, simu
                                 if prev_mask[i] and opacity_mask[i]:
                                     #traj_img = cv2.arrowedLine(traj_img,(int(prev_projections[i,0]),int(prev_projections[i,1])),(int(current_projections[i,0]),int(current_projections[i,1])),colors[color_idx],arrow_tickness)
                                     # draw teh same but a line
-                                    traj_img = cv2.line(traj_img,(int(prev_projections[i,0]),int(prev_projections[i,1])),(int(current_projections[i,0]),int(current_projections[i,1])),colors[color_idx],arrow_tickness)
+                                    traj_img = cv2.arrowedLine(traj_img,(int(prev_projections[i,0]),int(prev_projections[i,1])),(int(current_projections[i,0]),int(current_projections[i,1])),colors[color_idx],arrow_tickness)
                 rendering[traj_img > 0] = traj_img[traj_img > 0]
                 prev_projections = current_projections
                 prev_mask = current_mask
@@ -294,8 +294,8 @@ def render_set(model_path, name, iteration, views, gaussians: GaussianMesh, simu
             gt_list.append(gt)
 
     video_imgs = [to8(img) for img in render_list]
+    video_gt_imgs = [to8(img.detach().cpu().numpy().transpose(1, 2, 0)) for img in gt_list]
     save_imgs = [torch.tensor((img.transpose(2,0,1)),device="cpu") for img in render_list ]
-
 
     time2=time()
     print("FPS:",(len(views)-1)/(time2-time1))
@@ -313,6 +313,7 @@ def render_set(model_path, name, iteration, views, gaussians: GaussianMesh, simu
             count +=1
     
     imageio.mimwrite(os.path.join(model_path, name, "ours_{}".format(iteration), 'video_rgb.mp4'), video_imgs, fps=30, quality=8)
+    imageio.mimwrite(os.path.join(model_path, name, "ours_{}".format(iteration), 'video_rgb_gt.mp4'), video_gt_imgs, fps=30, quality=8)
 
 
 def render_sets(dataset: ModelParams, hyperparam, iteration: int, pipeline: PipelineParams, meshnet_params: MeshnetParams,
