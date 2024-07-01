@@ -96,7 +96,7 @@ class ClothMeshSimulator(nn.Module):
             node_features.append(noised_velocity)
         if velocity_noise is None:  # for rollout
             node_features.append(velocity)
-            pass
+
 
 
         # embed integer node_type to onehot vector
@@ -148,14 +148,12 @@ class ClothMeshSimulator(nn.Module):
 
 
         # target acceleration
-        noised_velocities = velocity 
         if velocity_noise is not None:
-            noised_velocities += velocity_noise
-            target_accelerations = target_velocities - noised_velocities
+            noised_velocities = velocity + velocity_noise
+            target_accelerations = target_velocities - noised_velocities[:, -3:]
         else: 
             target_accelerations = target_velocities - velocity[:, -3:]
         target_normalized_accelerations = self._output_normalizer(target_accelerations, self.training)
-
 
         # print(self._output_normalizer._mean())
         # print(self._output_normalizer._std_with_epsilon())

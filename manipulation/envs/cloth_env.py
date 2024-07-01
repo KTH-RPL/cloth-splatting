@@ -2,6 +2,7 @@ import numpy as np
 from gym.spaces import Box
 import pyflex
 from manipulation.envs.gym_env import GymEnv
+from manipulation.utils.eval_utils import get_current_covered_area
 from manipulation.action_space.action_space import Picker, PickerPickPlace, PickerQPG
 from copy import deepcopy
 from pyflex_utils.se3 import SE3Container
@@ -13,13 +14,16 @@ from pyflex_utils.utils import (
     ClothParticleSystem,
     wait_until_scene_is_stable,
     ParticleGrasperObserver,
-    ParticleGrasper
+    ParticleGrasper,
 )
+from manipulation.envs.camera_utils import get_world_coor_from_image, get_matrix_world_to_camera, intrinsic_from_fov
 import pathlib
 import json
 from manipulation.envs.utils import (
     compute_intrinsics,
-    get_matrix_world_to_camera
+    # get_matrix_world_to_camera,
+    pixel_to_3d_position,
+    project_3d_to_pixel,
 )
 import random
 import os 
@@ -36,7 +40,7 @@ class ClothEnv(GymEnv):
                  num_steps_per_action=1,
                  action_mode="line", 
                  render_mode='cloth', 
-                 picker_radius=0.05, 
+                 picker_radius=0.05,  
                  picker_threshold=0.005,
                  particle_radius=0.00625, 
                  **kwargs):
@@ -130,6 +134,41 @@ class ClothEnv(GymEnv):
 
         with open(os.path.join(output_dir_cam, "camera_params.json"), "w") as f:
             json.dump(camera_params, f)
+            
+    def pixel_to_3d(self, pixel, depth, camera_name='camera_0'):
+        cam_params = self.camera_params[camera_name]
+        matrix_world_to_camera = get_matrix_world_to_camera(cam_pos=cam_params['cam_position'], cam_angle=cam_params['cam_angle'])
+        
+        fov = cam_params["cam_fov"]*180/np.pi
+        world_coord = get_world_coor_from_image(pixel[0], pixel[1], depth.shape, matrix_world_to_camera, depth, fov=fov)
+        return world_coord
+        # return pixel_to_3d_position(pixel, depth, self.camera_params, camera_name=camera_name)
+    
+    
+    def project_to_image(self, position, camera_name='camera_0'):
+        cam_params = self.camera_params[camera_name]
+        matrix_world_to_camera = get_matrix_world_to_camera(cam_pos=cam_params['cam_position'], cam_angle=cam_params['cam_angle'])
+        
+        height, width = cam_params["cam_size"][0], cam_params["cam_size"][1]
+        
+        position = position.reshape(-1, 3)
+        world_coordinate = np.concatenate([position, np.ones((len(position), 1))], axis=1)  # n x 4
+        camera_coordinate = matrix_world_to_camera @ world_coordinate.T  # 3 x n
+        camera_coordinate = camera_coordinate.T  # n x 3
+        fov = cam_params["cam_fov"]*180/np.pi
+        K = intrinsic_from_fov(height, width, fov)  
+
+        u0 = K[0, 2]
+        v0 = K[1, 2]
+        fx = K[0, 0]
+        fy = K[1, 1]
+
+        x, y, depth = camera_coordinate[:, 0], camera_coordinate[:, 1], camera_coordinate[:, 2]
+        u = (x * fx / depth + u0).astype("int")
+        v = (y * fy / depth + v0).astype("int")
+
+        return u, v
+        # return project_3d_to_pixel(position, self.camera_params, camera_name=camera_name)
             
     def init_mesh(self, ):
         # TODO: save somewhere these parameters!
@@ -249,6 +288,15 @@ class ClothEnv(GymEnv):
         fold_vector = palce_position - grasp_position
         
         return fold_vector
+    
+    def get_closest_point(self, point):
+        # given a 3D point, we would like to get the closest point in the cloth
+        cloth_points = self.cloth_system.get_positions()
+        distances = np.linalg.norm(cloth_points - point, axis=1)
+        closest_point_idx = np.argmin(distances)
+        return closest_point_idx
+    
+    
 
     def set_scene(self, camera_name=None, state=None):
         if self.render_mode == 'particle':
@@ -347,6 +395,9 @@ class ClothEnv(GymEnv):
     def compute_reward(self, action=None, obs=None, set_prev_reward=False):
         # TODO: do be implemented
         return 0
+    
+    def compute_coverage(self):
+        return get_current_covered_area(self.n_particles, self.cloth_particle_radius)
     
     def _get_obs_old(self):
         if self.observation_mode == 'cam_rgb':

@@ -12,7 +12,7 @@ class SamplesClothDataset(torch.utils.data.Dataset):
     Code inspired by https://github.com/geoelements/gns/blob/main/meshnet/data_loader.py
     """
 
-    def __init__(self, data_path, input_length_sequence=1, dt=1., knn=3, delaunay=False, subsample=False, num_samples=300, transform=None):
+    def __init__(self, data_path, FLAGS,  input_length_sequence=1, dt=1., knn=3, delaunay=False, subsample=False, num_samples=300, transform=None):
         super().__init__()
         self._dt = dt
         self.delaunay = delaunay
@@ -20,12 +20,18 @@ class SamplesClothDataset(torch.utils.data.Dataset):
         self.subsample = subsample
         self.num_samples = num_samples
         self._input_length_sequence = input_length_sequence
+        self._action_steps = FLAGS.action_steps
+        self._future_sequence_length = FLAGS.future_sequence_length
 
         self._data = self.load_data(data_path)
         self.transform = transform
 
         # length of each trajectory in the dataset
-        self._data_lengths = [x["pos"].shape[0] - self._input_length_sequence for x in self._data]
+        self._compute_cumulative_lengths()
+        
+    def _compute_cumulative_lengths(self):
+        # length of each trajectory in the dataset
+        self._data_lengths = [x["pos"].shape[0] - self._input_length_sequence - self._future_sequence_length + 1 for x in self._data]
         self._length = sum(self._data_lengths)
 
         # pre-compute cumulative lengths
@@ -96,7 +102,7 @@ class SamplesClothDataset(torch.utils.data.Dataset):
 
 class TrajectoriesClothDataset(torch.utils.data.Dataset):
 
-    def __init__(self, data_path, dt=1., knn=3, delaunay=False, subsample=False, num_samples=300):
+    def __init__(self, data_path, FLAGS, dt=1., knn=3, delaunay=False, subsample=False, num_samples=300):
         super().__init__()
         # whose shapes are (600, 1876, 2), (600, 1876, 1), (600, 1876, 2), (600, 3518, 3), (600, 1876, 1)
         # convert to list of tuples
@@ -105,6 +111,8 @@ class TrajectoriesClothDataset(torch.utils.data.Dataset):
         self.delaunay = delaunay
         self.subsample = subsample
         self.num_samples = num_samples
+        self._input_length_sequence = FLAGS.input_sequence_length
+        self._action_steps = FLAGS.action_steps
         self._data = self.load_data(data_path)
 
         # length of each trajectory in the dataset
@@ -114,7 +122,6 @@ class TrajectoriesClothDataset(torch.utils.data.Dataset):
         self._length = len(self._data)
 
     def load_data(self, data_path):
-        # TODO: extend to multiple trajectories and eventually transfor it into dictionary for different labels (e.g. position, velocity, label)
         data = []
         traj = load_traj(data_path)
         trajectory_data = process_traj(traj, self._dt, self.k, self.delaunay, subsample=self.subsample, num_samples=self.num_samples)

@@ -216,8 +216,8 @@ class GymEnv(gym.Env):
         """ use pyflex.render to get a rendered image. """
         rgb, _, _ = pyflex.render(uv=False)
         rgb = rgb.astype(np.uint8)
-        if width != rgb.shape[0] or height != rgb.shape[1]:
-            rgb = cv2.resize(rgb, (width, height))
+        # if width != rgb.shape[0] or height != rgb.shape[1]:
+        #     rgb = cv2.resize(rgb, (width, height))
         return rgb
     
     def get_images(self, width=720, height=720):
@@ -227,10 +227,10 @@ class GymEnv(gym.Env):
         # Need to reverse the height dimension
         rgb = np.flip(rgb.reshape([im_height, im_width, 4]), 0)[:, :, :3].astype(np.uint8)
         depth = np.flip(depth.reshape([im_height, im_width]), 0)
-        if (width != rgb.shape[0] or height != rgb.shape[1]) and \
-                (width is not None and height is not None):
-            rgb = cv2.resize(rgb, (width, height))
-            depth = cv2.resize(depth, (width, height))
+        # if (width != rgb.shape[0] or height != rgb.shape[1]) and \
+        #         (width is not None and height is not None):
+        #     rgb = cv2.resize(rgb, (width, height))
+        #     depth = cv2.resize(depth, (width, height))
         return rgb, depth
     
     def set_scene(self, config, state=None):

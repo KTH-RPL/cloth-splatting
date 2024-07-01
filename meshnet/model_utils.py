@@ -95,12 +95,12 @@ class Normalizer(nn.Module):
 
         return dict
 
-def get_velocity_noise(graph, noise_std, device):
-    velocity_sequence = graph.x[:, 1:4]
-    type = graph.x[:, 0]
+def get_velocity_noise(graph, noise_std, input_sequence_length, device):
+    velocity_sequence = graph.x[:, 0:3*input_sequence_length]
+    # type = graph.x[:, 0]
     noise = torch.normal(std=noise_std, mean=0.0, size=velocity_sequence.shape).to(device)
-    mask = type != NodeType.CLOTH
-    noise[mask] = 0
+    # mask = type != NodeType.CLOTH
+    # noise[mask] = 0
     return noise.to(device)
 
 def datas_to_graph(training_example, dt, device):
