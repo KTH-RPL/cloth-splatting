@@ -5,7 +5,9 @@ import numpy as np
 import torch
 import torch_geometric.transforms as T
 import re
+import time
 import pickle
+from meshnet.viz import plot_mesh, plot_pcd_list, create_gif
 from meshnet.cloth_network import ClothMeshSimulator
 from meshnet.model_utils import optimizer_to, NodeType, datas_to_graph_pos, datas_to_graph
 from meshnet.model_utils import get_velocity_noise
@@ -24,13 +26,43 @@ from train_meshnet_sim import update_prediction, rollout
 from moviepy.editor import ImageSequenceClip
 import h5py
 import torch_geometric
+import copy
 
 #change matplotlib backend
-plt.switch_backend('agg')
+# plt.switch_backend('agg')
 
 # an instance that transforms face-based graph to edge-based graph. Edge features are auto-computed using "Cartesian" and "Distance"
 transformer = T.Compose([T.FaceToEdge(), T.Cartesian(norm=False), T.Distance(norm=False)])
 edge_transformer = T.Compose([T.Cartesian(norm=False), T.Distance(norm=False)])
+
+def plot_point_cloud_with_trajectory(point_cloud, grasping_point, actions):
+    fig = plt.figure()
+    ax = fig.add_subplot(111, projection='3d')
+
+    # Plot the point cloud
+    ax.scatter(point_cloud[:, 0], point_cloud[:, 1], point_cloud[:, 2], c='b', marker='o', s=1, alpha=0.5, label='Point Cloud')
+
+    # Plot the grasping point
+    ax.scatter(grasping_point[0], grasping_point[1], grasping_point[2], c='r', marker='x', s=100, label='Grasping Point')
+
+    # Calculate and plot the trajectory
+    trajectory = [grasping_point]
+    current_point = grasping_point
+    for action in actions:
+        current_point = current_point + action
+        trajectory.append(current_point)
+
+    trajectory = np.array(trajectory)
+    ax.plot(trajectory[:, 0], trajectory[:, 1], trajectory[:, 2], c='g', label='Trajectory')
+
+    # Labels and legend
+    ax.set_xlabel('X')
+    ax.set_ylabel('Y')
+    ax.set_zlabel('Z')
+    ax.legend()
+    
+    plt.show()
+
 
 def save_mesh(mesh, path, name="mesh.hdf5"):
     mesh = mesh.to_dict()
@@ -78,54 +110,85 @@ def predict(simulator, device, FLAGS, exp_name, save_gif=False):
                                                      delaunay=True*FLAGS.delaunay,
                                                      subsample=True*FLAGS.subsample,
                                                      num_samples=FLAGS.num_samples,
+                                                     sim_data=False,
                                                      )
+    
+    data_sim_path ='./sim_datasets/test_dataset_0415/TOWEL'
+    ds_sim = data_loader.get_data_loader_by_samples(path=f"{data_sim_path}/{FLAGS.mesh_idx+2:05}/",
+                                                    input_length_sequence=FLAGS.input_sequence_length,
+                                                    FLAGS=FLAGS,
+                                                    dt=FLAGS.dt,
+                                                batch_size=FLAGS.batch_size,
+                                                    knn=FLAGS.knn,
+                                                    delaunay=True*FLAGS.delaunay,
+                                                    subsample=True*FLAGS.subsample,
+                                                    num_samples=FLAGS.num_samples,
+                                                    sim_data=True,
+                                                    )
     print("Loaded dataset")
     input_sequence_length = FLAGS.input_sequence_length
 
+    a = ds.dataset._data[0]['pos'][0]
+    b = ds.dataset._data[0]['edge_index'][0]
+    plot_mesh(a, b.T)
     # Rollout
-    with torch.no_grad():
-        t = FLAGS.traj_idx
-        features = ds.dataset.__get_val_item__(ds.dataset._precompute_cumlengths[t]-1, future=-1)
-        nsteps = len(features['actions'])
-        # features['actions'] *= 0
-        prediction_data = rollout(simulator, ds, features, nsteps, device, FLAGS.input_sequence_length, FLAGS.dt)
-        print(f"Rollout for example{t}: loss = {prediction_data['mean_loss']}")
-        
-        graph_paths_before =f"{FLAGS.data_path}/{FLAGS.mesh_idx:05}/{t:05}/splits"
-        graph_paths = f"{FLAGS.data_path}/{FLAGS.mesh_idx:05}/{t:05}/splits/mesh_predictions/"
-        os.makedirs(graph_paths, exist_ok=True)
-        
-        # save starting point
-        mesh = get_mesh_data(torch.from_numpy(prediction_data['initial_pos']), torch.from_numpy(prediction_data['faces']).long())
-        save_mesh(mesh, graph_paths_before, name="init_mesh.hdf5")
-        save_mesh(mesh, graph_paths, name=f"mesh_{0:03}.hdf5")
-        images = []
+    # with torch.no_grad():
+    t = FLAGS.traj_idx
+    features = ds.dataset.__get_val_item__(ds.dataset._precompute_cumlengths[t]-1, future=-1)
+    # features_sim = ds_sim.dataset.__get_val_item__(ds_sim.dataset._precompute_cumlengths[t]-1, future=-1)
+    # features_sim['actions'][:len(features['actions'])] = copy.deepcopy(features['actions'])*0.01
+    # grasped_pos_rw = features['pos'][0][features['grasped_particle']] + np.asarray([-0.07, 0.03, 0])
+    
+    # plot_point_cloud_with_trajectory(features['pos'][0], features['pos'][0][features['grasped_particle']] , features['actions'])
+    # features_sim['vel'][0] *=0
+    # features_sim['pos'][1:] *=0
+    # grasped_particle_idx_sim = np.argmin(np.linalg.norm(features_sim['pos'][0] - grasped_pos_rw, axis=1))
+    # features_sim['grasped_particle'] = grasped_particle_idx_sim
+    # features = features_sim
+    # features['pos'] = features_sim['pos'][:len(features['pos'])] 
+    # features['actions'] = features_sim['actions'][:len(features['actions'])]*0.2
+    # features['actions'] /= 2.4
+    nsteps = len(features['actions'])
+    prediction_data = rollout(simulator, ds, features, nsteps, device, FLAGS.input_sequence_length, FLAGS.dt, real_world=True)
+    print(f"Rollout for example{t}: loss = {prediction_data['mean_loss']}")
+    
+    graph_paths_before =f"{FLAGS.data_path}/{FLAGS.mesh_idx:05}/{t:05}/split"
+    graph_paths = f"{FLAGS.data_path}/{FLAGS.mesh_idx:05}/{t:05}/split/mesh_predictions/"
+    os.makedirs(graph_paths, exist_ok=True)
+    
+    # save starting point
+    mesh = get_mesh_data(torch.from_numpy(prediction_data['initial_pos']), torch.from_numpy(prediction_data['faces']).long())
+    save_mesh(mesh, graph_paths_before, name="init_mesh.hdf5")
+    save_mesh(mesh, graph_paths, name=f"mesh_{0:03}.hdf5")
+    images = []
 
-        losses = [0]
-        for i in range(len(prediction_data['predicted_rollout'])):
-            gt_points = prediction_data['node_coords'][i+1]
-            pred_points = prediction_data['initial_pos'] + prediction_data['predicted_rollout'][:i+1].sum(axis=0)
-            edges = prediction_data['edge_index'].T
-            faces = prediction_data['faces']
-            loss =  (gt_points - pred_points) ** 2
-            losses.append(loss.mean().item())
-            # get figure and load it in wandb
-            if save_gif:
-                image = plot_mesh_predictions(gt_points, pred_points, edges, center_plot=None, white_bkg=False, 
-                                            save_fig=False, return_image=1, file_name='mesh.png', azim=-30, elev=20)
-                images.append(image)
-            
-            mesh = get_mesh_data(torch.from_numpy(pred_points), torch.from_numpy(faces).long())
-            save_mesh(mesh, graph_paths, name=f"mesh_{i+1:03}.hdf5")
+    losses = [0]
+    for i in range(len(prediction_data['predicted_rollout'])):
+        gt_points = prediction_data['node_coords'][i+1]
+        pred_points = prediction_data['initial_pos'] + prediction_data['predicted_rollout'][:i+1].sum(axis=0)
+        edges = prediction_data['edge_index'].T
+        faces = prediction_data['faces']
+        loss =  (gt_points - pred_points) ** 2
+        losses.append(loss.mean().item())
+        # get figure and load it in wandb
+        if save_gif:
+            image = plot_mesh_predictions(gt_points, pred_points, edges, center_plot=None, white_bkg=False, 
+                                        save_fig=False, return_image=1, file_name='mesh.png', azim=-30, elev=20)
+            # plot_mesh(pred_points, edges)
+            # plot_pcd_list([pred_points, np.asarray([pred_points[features['grasped_particle']]])])
+            images.append(image)
+        
+        mesh = get_mesh_data(torch.from_numpy(pred_points), torch.from_numpy(faces).long())
+        save_mesh(mesh, graph_paths, name=f"mesh_{i+1:03}.hdf5")
             
                    
-            
-        if save_gif:
-            gif_file = os.path.join(gif_path, f'AAAAAAAAAAArollout_{t}.gif')
-            clip = ImageSequenceClip(images, fps=1)
-            clip.write_gif(gif_file, fps=1)
-            
-            print(f"Saved gif to {gif_file}")
+    # gif_path = '.'
+    if save_gif:
+        gif_file = os.path.join(gif_path, f'AAAAAAAAAAArollout_{t}.gif')
+        clip = ImageSequenceClip(images, fps=1)
+        clip.write_gif(gif_file, fps=1)
+        
+        print(f"Saved gif to {gif_file}")
         
 
         
@@ -155,8 +218,8 @@ def main(_):
     
     i = 0
 
-    FLAGS.curriculum = params['curriculum'][i]
-    FLAGS.action_steps = params['action_steps'][i]
+    # FLAGS.curriculum = params['curriculum'][i]
+    # FLAGS.action_steps = params['action_steps'][i]
     FLAGS.noise_std = params['noise_std'][i]      
     FLAGS.num_samples = params['num_samples'][i]   
     
@@ -167,15 +230,20 @@ def main(_):
     FLAGS.data_path = os.path.join(original_data_path, FLAGS.object)
         
 
-    # exp_name = f"cloth-splatting-SIM-curr{FLAGS.curriculum}-astep{FLAGS.action_steps}-propagation{FLAGS.message_passing}-noise{FLAGS.noise_std}-history{FLAGS.input_sequence_length}-batch{FLAGS.batch_size}"
+    exp_name_old = f"cloth-splatting-SIM-curr{FLAGS.curriculum}-astep{FLAGS.action_steps}-propagation{FLAGS.message_passing}-noise{FLAGS.noise_std}-history{FLAGS.input_sequence_length}-batch{FLAGS.batch_size}"
     exp_name = f"cloth-splatting-SIM-curr{FLAGS.curriculum}-astep{FLAGS.action_steps}-propagation{FLAGS.message_passing}-noise{FLAGS.noise_std}-nodes{FLAGS.num_samples}"
 
     model_path = os.path.join(model_path_original, exp_name)
     # TODO: change this
     # model_file = f'{exp_name}model-190.pt'
     model_file = f'model-290.pt'
-    if FLAGS.action_steps == 3:
-        model_file =  f'{exp_name}model-120.pt'
+
+    # model_file = f'model-90.pt'
+    if FLAGS.action_steps == 3:        
+        exp_name_old = f"cloth-splatting-SIM-curr{FLAGS.curriculum}-astep{FLAGS.action_steps}-propagation{FLAGS.message_passing}-noise0.0-history{FLAGS.input_sequence_length}-batch{FLAGS.batch_size}"
+
+        model_path = os.path.join(model_path_original, exp_name_old)
+        model_file =  f'{exp_name_old}model-120.pt'
     FLAGS.model_path = model_path + '/'
     FLAGS.model_file = model_file
 
@@ -194,7 +262,7 @@ def main(_):
         device=device)
 
 
-    predict(simulator, device, FLAGS, exp_name)
+    predict(simulator, device, FLAGS, exp_name, save_gif=True)
 
     print()
             
@@ -207,11 +275,11 @@ if __name__=='__main__':
     flags.DEFINE_string('model_file', 'cloth-splatting-SIM-curr0-astep3-propagation15-noise0.0-history2-batch32/model-190.pt', #'model-2000.pt'
                         help=('Model filename (.pt) to resume from. Can also use "latest" to default to newest file.'))
 
-    flags.DEFINE_string('data_path', './sim_datasets/test_dataset_0415/', help='The dataset directory.')
+    flags.DEFINE_string('data_path', '/home/omniverse/workspace/vision/src/Cloth-Splatting/data_processed', help='The dataset directory.')
     # flags.DEFINE_string('data_val_path', './sim_datasets/test_dataset_0415/', help='The dataset directory.')
-    flags.DEFINE_string('object', 'TOWEL', help='The dataset directory.')
+    flags.DEFINE_string('object', 'TOWEL_02', help='The dataset directory.')
     flags.DEFINE_integer('mesh_idx', 0, help='Which mesh to load for prediction.')
-    flags.DEFINE_integer('traj_idx', 0, help='Which trajectory to unroll for predictions.')
+    flags.DEFINE_integer('traj_idx', 3, help='Which trajectory to unroll for predictions.')
 
     
     flags.DEFINE_integer('berzelius', 0, help='Whether it is running on berzelius or not.')
@@ -234,10 +302,10 @@ if __name__=='__main__':
 
     # Model parameters and training details
     flags.DEFINE_integer('input_sequence_length', int(2), help='Lenght of the sequence in input, default 1.')
-    flags.DEFINE_integer('future_sequence_length', int(1), help='Lenght of the sequence in input, default 1.')
+    flags.DEFINE_integer('future_sequence_length', int(3), help='Lenght of the sequence in input, default 1.')
     flags.DEFINE_integer('curriculum', int(0), help='Whether to use curriculum learning or not, wehre curriculum is the # of future steps to predict.')
    
-    flags.DEFINE_integer('action_steps', int(3), help='Number of actions to predict. Default 1.')
+    flags.DEFINE_integer('action_steps', int(1), help='Number of actions to predict. Default 1.')
     flags.DEFINE_integer('message_passing', int(15), help='Number of message passing steps. Default 15')
     flags.DEFINE_float('noise_std', float(0), help='Noise standard deviation.')
     flags.DEFINE_integer('node_type_embedding_size', int(1), help='Number of different types of nodes. So far only 1.')

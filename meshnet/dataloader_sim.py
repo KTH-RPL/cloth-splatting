@@ -19,7 +19,8 @@ class SamplesClothSimDataset(SamplesClothDataset):
                 delaunay=False, 
                 subsample=False, 
                 num_samples=300, 
-                transform=None
+                transform=None,
+                sim_data=True
                 ): 
         super().__init__(            
                 data_path, 
@@ -30,11 +31,15 @@ class SamplesClothSimDataset(SamplesClothDataset):
                 delaunay=delaunay, 
                 subsample=subsample, 
                 num_samples=num_samples,
+                sim_data=sim_data
         )
+        
+        self.sim_data = sim_data
         
     def load_data(self, data_paths):
         # TODO: extend to multiple envs and eventually transfor it into dictionary for different labels (e.g. position, velocity, label)
         load_keys=['pos', 'vel', 'actions', 'trajectory_params', 'gripper_pos', 'pick', 'place', 'grasped_particle']
+        load_keys=['pos', 'actions',  'gripper_pos', 'pick', 'place']
         data = []
         
         env_all_trajs = get_env_trajs_path(data_paths)            
@@ -43,7 +48,7 @@ class SamplesClothSimDataset(SamplesClothDataset):
         for all_trajs in env_all_trajs:
             for data_path in all_trajs:
                 params = (self._dt, self.k, self.delaunay, self.subsample, self.num_samples, self._input_length_sequence, self._action_steps)
-                trajectory_data = get_data_traj(data_path, load_keys, params, sim_data=True)                
+                trajectory_data = get_data_traj(data_path, load_keys, params, sim_data=self.sim_data )                
                 data.append(trajectory_data)
         return data
     
@@ -261,7 +266,7 @@ class SamplesClothSimDataset(SamplesClothDataset):
     
 class TrajectoriesClothSimDataset(TrajectoriesClothDataset):
 
-    def __init__(self, data_path, input_length_sequence, FLAGS, dt=1., knn=3, delaunay=False, subsample=False, num_samples=300):
+    def __init__(self, data_path, input_length_sequence, FLAGS, dt=1., knn=3, delaunay=False, subsample=False, num_samples=300, sim_data=True):
         super().__init__(data_path, FLAGS=FLAGS, dt=dt, knn=knn, delaunay=delaunay, subsample=subsample, num_samples=num_samples)
         # whose shapes are (600, 1876, 2), (600, 1876, 1), (600, 1876, 2), (600, 3518, 3), (600, 1876, 1)
         # convert to list of tuples
@@ -270,6 +275,7 @@ class TrajectoriesClothSimDataset(TrajectoriesClothDataset):
         self.delaunay = delaunay
         self.subsample = subsample
         self.num_samples = num_samples
+        self.sim_data = sim_data
         # self._data = self.load_data(data_path)
 
         # length of each trajectory in the dataset
@@ -279,7 +285,8 @@ class TrajectoriesClothSimDataset(TrajectoriesClothDataset):
         self._length = len(self._data)
 
     def load_data(self, data_paths):
-        load_keys=['pos', 'vel', 'actions', 'trajectory_params', 'gripper_pos', 'pick', 'place', 'grasped_particle']
+        load_keys=['pos', 'vel', 'actions', 'trajectory_params', 'gripper_pos', 'pick', 'place', 'grasped_particle']        
+        load_keys=['pos', 'actions',  'gripper_pos', 'pick', 'place']
         data = []
         
         env_all_trajs = get_env_trajs_path(data_paths)        
@@ -289,7 +296,7 @@ class TrajectoriesClothSimDataset(TrajectoriesClothDataset):
         for all_trajs in env_all_trajs:
             for data_path in all_trajs:
                 params = (self._dt, self.k, self.delaunay, self.subsample, self.num_samples, self._input_length_sequence, self._action_steps)
-                trajectory_data = get_data_traj(data_path, load_keys, params, sim_data=True)                    
+                trajectory_data = get_data_traj(data_path, load_keys, params, sim_data=self.sim_data )                    
                 
                 data.append(trajectory_data)
                 
@@ -403,12 +410,12 @@ class TrajectoriesClothSimDataset(TrajectoriesClothDataset):
         return trajectory_dict
     
     
-def get_data_loader_by_samples(path, input_length_sequence, FLAGS, dt, batch_size, knn=3, delaunay=False, subsample=False, num_samples=300, shuffle=True):
-    dataset = SamplesClothSimDataset(path, input_length_sequence, FLAGS, dt, knn, delaunay=delaunay, subsample=subsample, num_samples=num_samples)
+def get_data_loader_by_samples(path, input_length_sequence, FLAGS, dt, batch_size, knn=3, delaunay=False, subsample=False, num_samples=300, shuffle=True, sim_data=True):
+    dataset = SamplesClothSimDataset(path, input_length_sequence, FLAGS, dt, knn, delaunay=delaunay, subsample=subsample, num_samples=num_samples, sim_data=sim_data)
     return torch_geometric.loader.DataLoader(dataset, batch_size=batch_size, shuffle=shuffle)
 
-def get_data_loader_by_trajectories(path, input_length_sequence, FLAGS, knn=3, delaunay=False, subsample=False, num_samples=300):
-    dataset = TrajectoriesClothSimDataset(path, input_length_sequence, FLAGS, knn=knn, delaunay=delaunay, subsample=subsample, num_samples=num_samples)
+def get_data_loader_by_trajectories(path, input_length_sequence, FLAGS, knn=3, delaunay=False, subsample=False, num_samples=300, sim_data=True):
+    dataset = TrajectoriesClothSimDataset(path, input_length_sequence, FLAGS, knn=knn, delaunay=delaunay, subsample=subsample, num_samples=num_samples, sim_data=sim_data)
     return torch.utils.data.DataLoader(dataset, batch_size=None, shuffle=False,
                                        pin_memory=True)
 

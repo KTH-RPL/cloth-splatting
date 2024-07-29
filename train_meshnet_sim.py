@@ -5,6 +5,7 @@ import numpy as np
 import torch
 import torch_geometric.transforms as T
 import re
+import time
 import pickle
 from meshnet.cloth_network import ClothMeshSimulator
 from meshnet.model_utils import optimizer_to, NodeType, datas_to_graph_pos, datas_to_graph
@@ -21,6 +22,7 @@ from torch_geometric.data import Data
 import os
 import matplotlib.pyplot as plt
 import h5py
+import torch.optim as optim
 import torch_geometric
 os.environ['CUDA_LAUNCH_BLOCKING'] = '1'
 
@@ -86,7 +88,7 @@ def predict(simulator, device, FLAGS):
 
     print(f"Mean loss on rollout prediction: {prediction_data['mean_loss']}")
 
-def rollout(simulator, ds, features, nsteps, device, input_sequence_length, dt):
+def rollout(simulator, ds, features, nsteps, device, input_sequence_length, dt, real_world=False):
 
     node_coords = features['pos'] # (timesteps, nnode, ndims)
     node_vels = features['vel']  # (timesteps, nnode, ndims)
@@ -98,20 +100,32 @@ def rollout(simulator, ds, features, nsteps, device, input_sequence_length, dt):
     # edge_displacement = features['edge_norm']  # (nedges, 3)
     faces = features['faces']  # (nfaces, 3)
     grasped_particle = features['grasped_particle']  # (timesteps, nnode, )
+    
+    # plot_pcd_list([node_coords[0], np.asarray([node_coords[0][grasped_particle]])])
+    # plot_mesh(node_coords[0], edge_index[0].T)
 
     initial_velocities = node_vels[:input_sequence_length]
     ground_truth_velocities = node_vels[input_sequence_length:]
 
     current_velocities = initial_velocities.to(device)
 
+    # Compute the edge lengths for the original mesh
+    edge_vectors = node_coords[0][edge_index.T[:, 1]] - node_coords[0][edge_index.T[:, 0]]
+    edge_vectors = edge_vectors.to(device)
+    original_edge_lengths = torch.norm(edge_vectors, dim=1).to(device)
+
     predictions = []
     mask = None
-
+    current_node_coords = node_coords[0].to(device)
     # for step in tqdm(range(nsteps), total=nsteps):
+    
+    # get time in seconds
+
+    time__now = time.time()
     for step in range(nsteps):
         # Predict next velocity
         # First, obtain data to form a graph
-        current_node_coords = node_coords[step].to(device)
+        current_node_coords_real = node_coords[step].to(device)
         current_node_type = node_types.to(device)
         current_action = actions[step:step+1].to(device)
         current_faces = faces.to(device)
@@ -143,6 +157,9 @@ def rollout(simulator, ds, features, nsteps, device, input_sequence_length, dt):
             node_type=node_ty,
             edge_index=edge_ind,
             edge_features=edge_feat)
+        
+        # todo: remember that you added this
+        # predicted_next_velocity[features['grasped_particle']] = current_action
 
         # Apply mask.
         if mask is None:  # only compute mask for the first timestep, since it will be the same for the later timesteps
@@ -150,16 +167,103 @@ def rollout(simulator, ds, features, nsteps, device, input_sequence_length, dt):
             mask = current_node_type == NodeType.CLOTH
             mask = torch.logical_not(mask)
             mask = mask.squeeze(1).to(device)
+            
+            
         # Maintain previous velocity if node_type is not (Normal or Outflow).
         # i.e., only update normal or outflow nodes.
         # predicted_next_velocity[mask] = next_ground_truth_velocities[mask]
+        predicted_next_velocity[grasped_particle] = current_action
+        # predicted_next_velocity[grasped_particle] = 0
+        
+        ########################################################################################################
+        # updated_node_coords = current_node_coords + predicted_next_velocity
+        # updated_edge_vectors = updated_node_coords[edge_index.T[:, 1]] - updated_node_coords[edge_index.T[:, 0]]
+        # updated_edge_lengths = torch.norm(updated_edge_vectors, dim=1)
+        
+        
+        # # Compute the deviation from the original edge lengths
+        # deviation_norm = original_edge_lengths - updated_edge_lengths
+
+        # # Ensure the ratios are between 0.9 and 1.1 to avoid too much deviation
+        # length_ratios = torch.clamp(length_ratios, 0.9, 1.1)
+        
+        # # Calculate the corrected edge vectors
+        # corrected_edge_vectors = edge_vectors * length_ratios.unsqueeze(1)
+        # # Calculate the displacement needed to adjust the velocities
+        # displacement = corrected_edge_vectors - updated_edge_vectors
+        
+        
+        # # Distribute the displacement equally among the connected nodes
+        # displacement = displacement / 2
+        # predicted_next_velocity[edge_index[0]] += displacement
+        # predicted_next_velocity[edge_index[1]] -= displacement
+        ################################
+        # # Compute the scaling factors to ensure edge lengths do not deviate too much
+        # scaling_factors = torch.min(original_edge_lengths / updated_edge_lengths, torch.ones_like(original_edge_lengths))
+        # scaling_factors = torch.max(scaling_factors, torch.ones_like(original_edge_lengths))
+        
+        # Apply scaling factors to the predicted velocities
+        # scaling_factors = scaling_factors.unsqueeze(1).repeat(1, 3)  # Repeat for x, y, z dimensions
+        # corrected_velocity_displacements = (updated_edge_vectors * scaling_factors).reshape(-1, 3)
+        # predicted_next_velocity[edge_index.T[:, 1]] = corrected_velocity_displacements
+        # predicted_next_velocity[edge_index.T[:, 0]] -= corrected_velocity_displacements
+        #############################################
+        if real_world:
+
+        
+            # Detach and set requires_grad to True for optimization
+            predicted_next_velocity_optim = predicted_next_velocity.detach().clone().requires_grad_(True)
+
+            # Define the optimizer
+            optimizer = optim.Adam([predicted_next_velocity_optim], lr=1e-3)
+
+            # Optimization loop
+            for _ in range(10):
+                optimizer.zero_grad()  # Reset gradients
+
+                # Compute updated node coordinates
+                updated_node_coords = current_node_coords + predicted_next_velocity_optim
+
+                # Compute updated edge vectors and lengths
+                updated_edge_vectors = updated_node_coords[edge_index[0]] - updated_node_coords[edge_index[1]]
+                updated_edge_lengths = torch.norm(updated_edge_vectors, dim=1)
+
+                # Compute the regularization term based on the deviation from the original edge lengths
+                length_deviation = updated_edge_lengths - original_edge_lengths
+                length_deviation[grasped_particle] *= 0
+                regularization_term = torch.sum(length_deviation ** 2)
+
+
+                # Backpropagation
+                regularization_term.backward(retain_graph=True)
+
+                # Check gradients
+                # print(f"Gradient norm: {predicted_next_velocity_optim.grad.norm()}")
+
+                optimizer.step()
+                
+                # predicted_next_velocity_optim[grasped_particle] = current_action
+
+            # Apply the optimized velocities
+            predicted_next_velocity = predicted_next_velocity_optim.detach()
+            predicted_next_velocity[grasped_particle] = current_action
+
+        ########################################################################################################
+
+
         predictions.append(predicted_next_velocity)
+        
+        # here we want to add a refularization to the updated position not to get the original norms of the edges to deviate too much from the original ones
+        #(add code here to do a soft clip the predicted velocities to the original norms of the edges)
+        
+        current_node_coords += predicted_next_velocity
+        
 
         # Update current position for the next prediction
         current_velocities[:input_sequence_length-1] = current_velocities[1:]
         current_velocities[-1] = predicted_next_velocity.to(device)
         
-
+    print(f"Time for rollout: {time.time() - time__now}")
     # Prediction with shape (time, nnodes, dim)
     predictions = torch.stack(predictions)
 
@@ -169,14 +273,14 @@ def rollout(simulator, ds, features, nsteps, device, input_sequence_length, dt):
 
     output_dict = {
         'initial_pos': node_coords[0].cpu().numpy(),
-        'predicted_rollout': predictions.cpu().numpy(),
+        'predicted_rollout': predictions.detach().cpu().numpy(),
         'ground_truth_rollout': ground_truth_velocities.cpu().numpy(),
         'node_coords': node_coords.cpu().numpy(),
         'node_types': node_types.cpu().numpy(),
         'edge_index': edge_index.cpu().numpy(),
         'faces': faces.cpu().numpy(),
         'dt': dt,
-        'mean_loss': loss.mean().cpu().numpy()
+        'mean_loss': loss.mean().detach().cpu().numpy()
     }
 
     return output_dict
@@ -483,7 +587,7 @@ if __name__=='__main__':
     flags.DEFINE_string('data_val_path', './sim_datasets/test_dataset_0415/TOWEL', help='The dataset directory.')
     
     flags.DEFINE_integer('berzelius', 0, help='Whether it is running on berzelius or not.')
-    flags.DEFINE_integer('wandb', 0, help='Whether it is using wandb to log or not.')
+    flags.DEFINE_integer('wandb', 1, help='Whether it is using wandb to log or not.')
 
 
 
@@ -503,7 +607,7 @@ if __name__=='__main__':
     # Model parameters and training details
     flags.DEFINE_integer('input_sequence_length', int(2), help='Lenght of the sequence in input, default 1.')
     flags.DEFINE_integer('future_sequence_length', int(1), help='Lenght of the sequence in input, default 1.')
-    flags.DEFINE_integer('curriculum', int(1), help='Whether to use curriculum learning or not, wehre curriculum is the # of future steps to predict.')
+    flags.DEFINE_integer('curriculum', int(0), help='Whether to use curriculum learning or not, wehre curriculum is the # of future steps to predict.')
    
     flags.DEFINE_integer('action_steps', int(3), help='Number of actions to predict. Default 1.')
     flags.DEFINE_integer('message_passing', int(15), help='Number of message passing steps. Default 15')

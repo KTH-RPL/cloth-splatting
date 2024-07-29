@@ -12,7 +12,7 @@ class SamplesClothDataset(torch.utils.data.Dataset):
     Code inspired by https://github.com/geoelements/gns/blob/main/meshnet/data_loader.py
     """
 
-    def __init__(self, data_path, FLAGS,  input_length_sequence=1, dt=1., knn=3, delaunay=False, subsample=False, num_samples=300, transform=None):
+    def __init__(self, data_path, FLAGS,  input_length_sequence=1, dt=1., knn=3, delaunay=False, subsample=False, num_samples=300, transform=None, sim_data=True):
         super().__init__()
         self._dt = dt
         self.delaunay = delaunay
@@ -21,7 +21,8 @@ class SamplesClothDataset(torch.utils.data.Dataset):
         self.num_samples = num_samples
         self._input_length_sequence = input_length_sequence
         self._action_steps = FLAGS.action_steps
-        self._future_sequence_length = FLAGS.future_sequence_length
+        self._future_sequence_length = FLAGS.future_sequence_length                
+        self.sim_data = sim_data
 
         self._data = self.load_data(data_path)
         self.transform = transform
