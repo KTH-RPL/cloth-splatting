@@ -12,7 +12,8 @@ import glob
 import shutil 
 import copy
 from manipulation.fold_rendering.render_poses_frame import render_poses_frames
-    
+import pdb
+
 def get_json(results_path):
     json_path = os.path.join(results_path,'dnerf.json')
     # open json file from json_path 
@@ -37,6 +38,8 @@ def obj_to_rgb(args, obj_folder, split, json_file):
     obj_paths.sort()
     tmp_args.frame_start = 0
     tmp_args.frame_end = len(obj_paths)-1
+    
+    # pdb.set_trace()
 
     gen_poses(tmp_args,json_file=json_file)
     render_poses_frames(tmp_args, obj_paths=obj_paths)
@@ -58,12 +61,20 @@ def obj_to_rgb(args, obj_folder, split, json_file):
     # copy images to split folder
     for i in range(len(json_data_filtered['frames'])):
     # for i in range(2):
-        raw_file_path = json_data_filtered['frames'][i]['file_path']
-        pacnerf_path = os.path.join(args.results,split,'pacnerf','data',raw_file_path.split('/')[-1])
-        shutil.copyfile(pacnerf_path,os.path.join(args.meta,split,raw_file_path.split('/')[-1]))
+        if args.depth:
+            raw_file_path = json_data_filtered['frames'][i]['file_path']
+            raw_file_end = raw_file_path.split('/')[-1].split('.')[0]
+            raw_file_path_depth = f'{raw_file_end}.depth.exr'
+            pacnerf_path = os.path.join(args.results,split,'pacnerf','data',raw_file_path_depth)
+            shutil.copyfile(pacnerf_path,os.path.join(args.meta,split,raw_file_path_depth))
+        else:
+            raw_file_path = json_data_filtered['frames'][i]['file_path']
+            pacnerf_path = os.path.join(args.results,split,'pacnerf','data',raw_file_path.split('/')[-1])
+            shutil.copyfile(pacnerf_path,os.path.join(args.meta,split,raw_file_path.split('/')[-1]))
     
-    if args.depth:
-        shutil.copyfile(os.path.join(args.results,split,'pacnerf/data/depth.npz'),os.path.join(args.meta,split,'depth.npz'))
+    # if args.depth:
+        
+    #     shutil.copyfile(os.path.join(args.results,split,'pacnerf/data/depth.npz'),os.path.join(args.meta,split,'depth.npz'))
 
     if split == 'train':
         n_views = args.split*args.views

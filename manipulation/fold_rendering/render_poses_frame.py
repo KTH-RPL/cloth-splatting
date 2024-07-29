@@ -433,8 +433,8 @@ def render_poses_frames(args, obj_paths):
                         split_depth = np.concatenate((split_depth,load_exr(depth_file)),axis=0)
 
 
-            # save depth_files_loaded 
-            np.savez(os.path.join(pacnerf_dir,'data','depth.npz'),depth=split_depth,filenames=np.array(depth_files_loaded))
+        #     # save depth_files_loaded 
+        #     np.savez(os.path.join(pacnerf_dir,'data','depth.npz'),depth=split_depth,filenames=np.array(depth_files_loaded))
 
         
 if __name__ == '__main__':
