@@ -16,12 +16,12 @@ from random import randint
 
 import torch.linalg
 
-from utils.loss_utils import l1_loss, ssim, l2_loss, lpips_loss
+from utils.loss_utils import l1_loss, ssim
 from gaussian_renderer import render, network_gui
 import sys
-from meshnet.scene import Scene
+from scene.scene import Scene
 
-from meshnet.gaussian_mesh import MultiGaussianMesh
+from scene.gaussian_mesh import MultiGaussianMesh
 from meshnet.meshnet_network import MeshSimulator, ResidualMeshSimulator
 
 from utils.general_utils import safe_state

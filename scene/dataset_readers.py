@@ -285,7 +285,7 @@ def readCamerasFromTransforms(path, transformsfile, white_background, extension=
         all_flow = None
         img_paths_flow = None
 
-    mask_path = os.path.join(path, 'masks')
+    mask_path = os.path.join(path, 'masks_gripper')
     if os.path.exists(mask_path):
         print("Loading masks..")
     else:

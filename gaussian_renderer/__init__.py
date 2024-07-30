@@ -13,10 +13,9 @@ import torch
 import math
 import numpy as np
 from diff_gaussian_rasterization import GaussianRasterizationSettings, GaussianRasterizer
-from meshnet.gaussian_mesh import MultiGaussianMesh
+from scene.gaussian_mesh import MultiGaussianMesh
 from meshnet.meshnet_network import ResidualMeshSimulator
 from utils.sh_utils import eval_sh
-import matplotlib.pyplot as plt
 
 
 def render(viewpoint_camera, pc: MultiGaussianMesh, simulator: ResidualMeshSimulator, pipe, bg_color: torch.Tensor,

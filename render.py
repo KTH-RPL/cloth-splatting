@@ -11,7 +11,7 @@
 import imageio
 import numpy as np
 import torch
-from scene import Scene
+from scene.scene import Scene
 import os
 import cv2
 from tqdm import tqdm
@@ -21,11 +21,10 @@ import torchvision
 from utils.general_utils import safe_state
 from argparse import ArgumentParser
 from arguments import ModelParams, PipelineParams, get_combined_args, ModelHiddenParams, MeshnetParams
-from meshnet.gaussian_mesh import GaussianMesh
+from scene.gaussian_mesh import GaussianMesh
 from meshnet.meshnet_network import MeshSimulator
 from time import time
-import glob 
-import matplotlib.pyplot as plt
+import glob
 from colormap import colormap
 
 

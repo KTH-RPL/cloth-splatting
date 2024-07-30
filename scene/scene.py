@@ -10,23 +10,19 @@
 #
 
 import os
-import random
-import json
 from typing import NamedTuple, Tuple
-import numpy as np
 
 import torch_geometric.data
 
 from meshnet.data_utils import load_mesh_from_h5py
 
 from utils.system_utils import searchForMaxIteration
-from scene.dataset_readers import SceneInfo, readCamerasFromTransforms, getNerfppNorm, read_timeline, \
-    generateCamerasFromTransforms, CameraInfo
-from meshnet.gaussian_mesh import MultiGaussianMesh
+from scene.dataset_readers import readCamerasFromTransforms, getNerfppNorm, read_timeline, \
+    generateCamerasFromTransforms
+from scene.gaussian_mesh import MultiGaussianMesh
 from scene.dataset import FourDGSdataset, MDNerfDataset
 from arguments import ModelParams
-from utils.camera_utils import cameraList_from_camInfos, camera_to_JSON
-from torch.utils.data import Dataset
+from utils.camera_utils import cameraList_from_camInfos
 import glob
 
 
