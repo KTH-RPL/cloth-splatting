@@ -11,7 +11,7 @@ import torch
 from PIL import Image
 import math
 from tqdm import tqdm
-from scene.utils import Camera
+from scene_reconstruction.utils import Camera
 from typing import NamedTuple
 from torch.utils.data import Dataset
 from utils.general_utils import PILtoTorch

@@ -13,7 +13,7 @@ import torch
 import math
 import numpy as np
 from diff_gaussian_rasterization import GaussianRasterizationSettings, GaussianRasterizer
-from scene.gaussian_mesh import MultiGaussianMesh
+from scene_reconstruction.gaussian_mesh import MultiGaussianMesh
 from meshnet.meshnet_network import ResidualMeshSimulator
 from utils.sh_utils import eval_sh
 

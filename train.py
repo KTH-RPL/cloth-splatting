@@ -19,9 +19,9 @@ import torch.linalg
 from utils.loss_utils import l1_loss, ssim
 from gaussian_renderer import render, network_gui
 import sys
-from scene.scene import Scene
+from scene_reconstruction.scene import Scene
 
-from scene.gaussian_mesh import MultiGaussianMesh
+from scene_reconstruction.gaussian_mesh import MultiGaussianMesh
 from meshnet.meshnet_network import MeshSimulator, ResidualMeshSimulator
 
 from utils.general_utils import safe_state

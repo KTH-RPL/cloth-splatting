@@ -13,9 +13,9 @@ import os
 import sys
 from PIL import Image
 from typing import NamedTuple
-from scene.colmap_loader import read_extrinsics_text, read_intrinsics_text, qvec2rotmat, \
+from scene_reconstruction.colmap_loader import read_extrinsics_text, read_intrinsics_text, qvec2rotmat, \
     read_extrinsics_binary, read_intrinsics_binary, read_points3D_binary, read_points3D_text
-from scene.hyper_loader import Load_hyper_data, format_hyper_data
+from scene_reconstruction.hyper_loader import Load_hyper_data, format_hyper_data
 import torchvision.transforms as transforms
 import copy
 from utils.graphics_utils import getWorld2View2, focal2fov, fov2focal
@@ -25,7 +25,7 @@ import json
 from pathlib import Path
 from plyfile import PlyData, PlyElement
 from utils.sh_utils import SH2RGB
-from scene.gaussian_model import BasicPointCloud
+from scene_reconstruction.gaussian_model import BasicPointCloud
 from utils.general_utils import PILtoTorch
 from tqdm import tqdm
 import h5py
@@ -527,7 +527,7 @@ def readdynerfInfo(datadir,use_bg_points,eval):
     # loading all the data follow hexplane format
     ply_path = os.path.join(datadir, "points3d.ply")
 
-    from scene.neural_3D_dataset_NDC import Neural3D_NDC_Dataset
+    from scene_reconstruction.neural_3D_dataset_NDC import Neural3D_NDC_Dataset
     train_dataset = Neural3D_NDC_Dataset(
     datadir,
     "train",

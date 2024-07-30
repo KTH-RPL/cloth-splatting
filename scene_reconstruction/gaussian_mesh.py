@@ -30,7 +30,7 @@ from utils.general_utils import strip_symmetric, build_scaling_rotation
 from meshnet.data_utils import compute_mesh, compute_edge_features, load_mesh_from_h5py, vertice_rotation, \
     compute_barycentric_coordinates
 
-from scene.gaussian_model import GaussianModel
+from scene_reconstruction.gaussian_model import GaussianModel
 
 
 class GaussianMesh(GaussianModel):

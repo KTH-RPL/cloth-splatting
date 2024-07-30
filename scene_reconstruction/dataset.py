@@ -1,5 +1,5 @@
 from torch.utils.data import Dataset
-from scene.cameras import Camera
+from scene_reconstruction.cameras import Camera
 import numpy as np
 from utils.general_utils import PILtoTorch
 from utils.graphics_utils import fov2focal, focal2fov

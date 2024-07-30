@@ -17,10 +17,10 @@ import torch_geometric.data
 from meshnet.data_utils import load_mesh_from_h5py
 
 from utils.system_utils import searchForMaxIteration
-from scene.dataset_readers import readCamerasFromTransforms, getNerfppNorm, read_timeline, \
+from scene_reconstruction.dataset_readers import readCamerasFromTransforms, getNerfppNorm, read_timeline, \
     generateCamerasFromTransforms
-from scene.gaussian_mesh import MultiGaussianMesh
-from scene.dataset import FourDGSdataset, MDNerfDataset
+from scene_reconstruction.gaussian_mesh import MultiGaussianMesh
+from scene_reconstruction.dataset import FourDGSdataset, MDNerfDataset
 from arguments import ModelParams
 from utils.camera_utils import cameraList_from_camInfos
 import glob
