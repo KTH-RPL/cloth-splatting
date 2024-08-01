@@ -24,6 +24,8 @@ from gaussian_renderer import render, network_gui
 import sys
 from scene_reconstruction.scene import Scene, read_cloth_scene_info
 
+from scene_reconstruction.cameras import Camera
+
 from scene_reconstruction.gaussian_mesh import MultiGaussianMesh
 from meshnet.meshnet_network import MeshSimulator, ResidualMeshSimulator
 
@@ -248,6 +250,85 @@ def regularization(all_vertice_deform, gaussians, opt: OptimizationParams, stati
     return loss
 
 
+def train_step(iteration, viewpoint_cams: list[Camera], gaussians: MultiGaussianMesh, simulator: MeshSimulator,
+               meshnet_optimizer, pipeline_params: PipelineParams, opt_params: OptimizationParams,
+               cameras_extent, background, static=False, white_background=False, user_args=None):
+
+    images = []
+    gt_images = []
+    radii_list = []
+    visibility_filter_list = []
+    viewspace_point_tensor_list = []
+    all_means_3D_deform = []
+    all_vertice_deform = []
+    masks = [] if viewpoint_cams[0].mask is not None else None
+
+    for viewpoint_cam in viewpoint_cams:
+
+        render_pkg = render(viewpoint_cam, gaussians, simulator, pipeline_params, background,
+                            no_shadow=user_args.no_shadow, render_static=static)
+        image = render_pkg.render
+        images.append(image.unsqueeze(0))
+        gt_image = viewpoint_cam.original_image.cuda()
+        gt_images.append(gt_image.unsqueeze(0))
+        radii_list.append(render_pkg.radii.unsqueeze(0))
+        visibility_filter_list.append(render_pkg.visibility_filter.unsqueeze(0))
+        viewspace_point_tensor_list.append(render_pkg.viewspace_points)
+        if masks is not None:
+            masks.append(viewpoint_cam.mask.cuda().unsqueeze(0))
+        all_means_3D_deform.append(render_pkg.means3D_deform[None, :, :])
+        all_vertice_deform.append(render_pkg.vertice_deform[None, :, :])
+
+    all_vertice_deform = torch.cat(all_vertice_deform, 0)
+
+    radii = torch.cat(radii_list, 0).max(dim=0).values
+    visibility_filter = torch.cat(visibility_filter_list).any(dim=0)
+    image_tensor = torch.cat(images, 0)
+    gt_image_tensor = torch.cat(gt_images, 0)
+    mask_tensor = torch.cat(masks, 0) if masks is not None else None
+
+    psnr_ = psnr(image_tensor, gt_image_tensor).mean().double()
+
+    # norm
+    loss, loss_dict = image_losses(image_tensor, gt_image_tensor, opt_params, mask_tensor)
+    loss += regularization(all_vertice_deform, gaussians, opt_params, static)
+
+    loss.backward()
+
+    viewspace_point_tensor_grad = torch.zeros_like(viewspace_point_tensor_list[0])
+    for idx in range(0, len(viewspace_point_tensor_list)):
+        viewspace_point_tensor_grad = viewspace_point_tensor_grad + viewspace_point_tensor_list[idx].grad
+
+    with torch.no_grad():
+
+        # Densification
+        if iteration < opt_params.densify_until_iter:
+            densification(gaussians, iteration, visibility_filter, radii,
+                          viewspace_point_tensor_grad, opt_params, cameras_extent)
+
+            if iteration % opt_params.opacity_reset_interval == 0 or (
+                    white_background and iteration == opt_params.densify_from_iter):
+                print("reset opacity")
+                gaussians.reset_opacity()
+
+        if iteration % opt_params.bary_cleanup:
+            gaussians.cleanup_barycentric_coordinates()
+
+        # Optimizer step
+        if iteration < opt_params.iterations:
+            if static:
+                gaussians.optimizer.step()
+                gaussians.optimizer.zero_grad(set_to_none=True)
+                meshnet_optimizer.zero_grad()
+            else:
+                gaussians.optimizer.step()
+                gaussians.optimizer.zero_grad(set_to_none=True)
+                meshnet_optimizer.step()
+                meshnet_optimizer.zero_grad()
+
+    return psnr_, loss, loss_dict
+
+
 def densification(gaussians, iteration, visibility_filter, radii, viewspace_point_tensor_grad, opt: OptimizationParams, cameras_extent):
 
     gaussians.max_radii2D[visibility_filter] = torch.max(gaussians.max_radii2D[visibility_filter],
@@ -270,4 +351,62 @@ def densification(gaussians, iteration, visibility_filter, radii, viewspace_poin
         size_threshold = 20 if iteration > opt.opacity_reset_interval else None
 
         gaussians.prune(densify_threshold, opacity_threshold, cameras_extent, size_threshold)
+
+#
+# class SingleStepOptimizer:
+# #
+#     scene_info: SceneInfo
+#     initial_mesh: torch_geometric.data.Data
+#     mesh_predictions: list[torch_geometric.data.Data]
+#     camera_data: MDNerfDataset
+#
+#     gaussians: MultiGaussianMesh
+#     simulator: ResidualMeshSimulator
+#
+#     def __init__(self, sh_degree, opt_params: OptimizationParams,
+#                  pipeline_params: PipelineParams, meshnet_params: MeshnetParams, args, white_background=False):
+#
+#         self.source_path = args.source_path
+#         self.white_background = args.white_background
+#         self.args = args
+#         self.opt_params = opt_params
+#         self.meshnet_params = meshnet_params
+#         self.pipeline_params = pipeline_params
+#
+#         self.white_background = white_background
+#         self.sh_degree = sh_degree
+#
+#         bg_color = [1, 1, 1] if white_background else [0, 0, 0]
+#         self.background = torch.tensor(bg_color, dtype=torch.float32, device="cuda")
+#
+#     def initialize(self):
+#         (self.scene_info, self.initial_mesh, self.mesh_predictions) = read_cloth_scene_info(self.source_path,
+#                                                                                             self.white_background)
+#         self.camera_data = MDNerfDataset(self.scene_info.train_cameras, self.args)
+#
+#         # load simulator
+#         mesh_pos = torch.concat([mesh.pos.unsqueeze(0) for mesh in self.mesh_predictions], dim=0)
+#         simulator = ResidualMeshSimulator(mesh_pos, device='cuda')
+#         simulator.train()
+#
+#         self.gaussians = MultiGaussianMesh(self.dataset.sh_degree)
+#         self.gaussians.from_mesh(self.initial_mesh, self.scene_info.nerf_normalization['radius'], self.opt.gaussian_init_factor)
+#
+#         self.gaussians.training_setup(self.opt_params)
+#
+#     def update_data(self):
+#         self.scene_info, self.initial_mesh, self.mesh_predictions = read_cloth_scene_info(self.args.source_path, self.args.white_background)
+#         self.camera_data = MDNerfDataset(self.scene_info.train_cameras, self.args)
+#
+#     def initial_reconstruction(self):
+#         meshnet_optimizer = torch.optim.Adam(self.simulator.parameters(),
+#                                              lr=self.meshnet_params.lr_init)
+#
+#         for iteration in range(self.opt_params.static_reconst_iteration):
+#             viewpoint_cams = [self.camera_data.get_one_item(iteration % len(self.camera_data), 0)]
+#             train_step(iteration, viewpoint_cams, self.gaussians, self.simulator, meshnet_optimizer, self.pipeline_params,
+#                        self.opt_params, self.scene_info.nerf_normalization['radius'], self.background, static=True, white_background=self.white_background, user_args=self.args)
+#
+#     def update_mesh_predictions(self):
+#         pass
 

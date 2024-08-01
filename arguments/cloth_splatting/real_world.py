@@ -35,15 +35,9 @@ OptimizationParams = dict(
     static_reconst_iteration=2500,
 
     lambda_rigid=0.5,
-    iterations=8000
+    iterations=8000,
 )
 
 ModelParams = dict(
  sh_degree=3
-)
-
-MeshnetParams = dict(
-    lr_init=1e-3,
-    lr_decay_rate=0.1,
-    lr_decay_steps=1500
 )

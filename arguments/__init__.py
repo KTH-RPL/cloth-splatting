@@ -165,29 +165,11 @@ class MeshnetParams(ParamGroup):
         self.meshnet_path = ''
         self.meshnet_file = 'latest'
 
-        # Model parameters and training details
-        self.nmessage_passing_steps = 15
-        self.noise_std = 0
-        self.dt = 1
-
         self.lr_init = 3e-4
         self.lr_decay_rate = 0.1
         self.lr_decay_steps = 5e6
 
-        self.latent_dim = 128
-        self.nmlp_layers = 2
-        self.mlp_hidden_dim = 128
-
-
-        # Data Processing
-        self.knn = 10
-        self.delaunay = 1
-        self.subsample = 1
-        self.num_samples = 300
-
         super().__init__(parser, "Meshnet Parameters")
-
-
 
 
 def get_combined_args(parser : ArgumentParser):

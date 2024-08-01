@@ -38,9 +38,3 @@ OptimizationParams = dict(
 ModelParams = dict(
  sh_degree=3
 )
-
-MeshnetParams = dict(
-    lr_init=1e-3,
-    lr_decay_rate=0.1,
-    lr_decay_steps=1500
-)
