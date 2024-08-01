@@ -195,40 +195,38 @@ def render_set(model_path, name, iteration, views, gaussians: GaussianMesh, simu
         render_pkg = render(view, gaussians, simulator,
                             pipeline, background, log_deform_path=log_deform_path, no_shadow=args.no_shadow,
                             project_vertices=track_vertices)
-        rendering = tonumpy(render_pkg["render"]).transpose(1, 2, 0)
+        rendering = tonumpy(render_pkg.render).transpose(1, 2, 0)
 
         if opacities is None:
-            opacities = render_pkg["opacities"].to("cpu").numpy()
+            opacities = render_pkg.opacities.to("cpu").numpy()
             opacity_mask = opacities > opacity_threshold
         
-            
-        
-        depth = render_pkg["depth"].to("cpu").numpy()
+        depth = render_pkg.depth.to("cpu").numpy()
             
         depth[depth < depth_dist_threshold] = 10e3  # set small depth to a large value for visualization purposes
 
-        dict_key_deform = 'vertice_deform' if track_vertices else 'means3D_deform'
-        dict_key_projections = 'vertice_projections' if track_vertices else 'projections'
+        deform = render_pkg.vertice_deform if track_vertices else render_pkg.means3D_deform
+        projections = render_pkg.vertice_projections if track_vertices else render_pkg.projections
+
         if gt_idxs is None:
             if gt is not None:
                 gt_t0 = gt[0]
-                gt_idxs = find_closest_gauss(gt_t0,render_pkg[dict_key_deform].cpu().numpy())
+                gt_idxs = find_closest_gauss(gt_t0, deform.cpu().numpy())
             else:
                 gt_idxs = np.arange(n_points)
-        
+
+        trajs = deform[gt_idxs].unsqueeze(0).cpu().numpy()
         if all_trajs is None:
             all_times = np.array([view_time])
-            all_trajs = render_pkg[dict_key_deform][gt_idxs].unsqueeze(0).cpu().numpy()
+            all_trajs = trajs
         else:
-            all_times = np.concatenate((all_times,np.array([view_time])),axis=0)
-            all_trajs = np.concatenate((all_trajs,render_pkg[dict_key_deform][gt_idxs].unsqueeze(0).cpu().numpy()),axis=0)
-        
-        
+            all_times = np.concatenate((all_times, np.array([view_time])),axis=0)
+            all_trajs = np.concatenate((all_trajs, trajs), axis=0)
                 
         if args.show_flow:
             traj_img = np.zeros((view.image_height,view.image_width,3))
-            current_projections = render_pkg[dict_key_projections].to("cpu").numpy()[gt_idxs]
-            gaussian_positions = render_pkg[dict_key_deform].cpu().numpy()[gt_idxs]
+            current_projections = projections.to("cpu").numpy()[gt_idxs]
+            gaussian_positions = deform.cpu().numpy()[gt_idxs]
             cam_center = view.camera_center.cpu().numpy()
             current_mask, image_mask = get_mask(projections=current_projections,gaussian_positions=gaussian_positions,depth=depth,cam_center=cam_center,
             height=view.image_height,width=view.image_width)
@@ -258,11 +256,11 @@ def render_set(model_path, name, iteration, views, gaussians: GaussianMesh, simu
                     for j in range(all_trajs.shape[0]-1):
 
                         prev_gaussians = all_trajs[j]
-                        prev_projections = project(all_trajs[j],view).cpu().numpy()
+                        prev_projections = project(all_trajs[j], view).cpu().numpy()
                         prev_time = all_times[j]
                         
                         current_gaussians = all_trajs[j+1]
-                        current_projections = project(all_trajs[j+1],view).cpu().numpy()
+                        current_projections = project(all_trajs[j+1], view).cpu().numpy()
                         current_time = all_times[j+1]
                         
                         prev_mask, _ = get_mask(projections=prev_projections,gaussian_positions=prev_gaussians,depth=depth,cam_center=cam_center,

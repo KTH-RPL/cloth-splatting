@@ -8,6 +8,7 @@
 #
 # For inquiries contact  george.drettakis@inria.fr
 #
+from typing import NamedTuple
 
 import torch
 import math
@@ -18,9 +19,26 @@ from meshnet.meshnet_network import ResidualMeshSimulator
 from utils.sh_utils import eval_sh
 
 
+class RenderResults(NamedTuple):
+    render: torch.Tensor
+    viewspace_points: torch.Tensor
+    visibility_filter: torch.Tensor
+    radii: torch.Tensor
+    depth: torch.Tensor
+    means3D_deform: torch.Tensor
+    vertice_deform: torch.Tensor
+    shadows_mean: torch.Tensor
+    shadows_std: torch.Tensor
+    projections: torch.Tensor
+    rotations: torch.Tensor
+    opacities: torch.Tensor
+    shadows: torch.Tensor
+    vertice_projections: torch.Tensor
+
+
 def render(viewpoint_camera, pc: MultiGaussianMesh, simulator: ResidualMeshSimulator, pipe, bg_color: torch.Tensor,
            scaling_modifier=1.0, override_color=None, log_deform_path=None, no_shadow=False, render_static=False,
-           project_vertices=False):
+           project_vertices=False) -> RenderResults:
     """
     Render the scene. 
     
@@ -183,19 +201,19 @@ def render(viewpoint_camera, pc: MultiGaussianMesh, simulator: ResidualMeshSimul
         shadows_std = torch.std(shadow_scalars)
     # Those Gaussians that were frustum culled or had a radius of 0 were not visible.
     # They will be excluded from value updates used in the splitting criteria.
-    return {"render": rendered_image,
-            "viewspace_points": screenspace_points,
-            "visibility_filter": radii > 0,
-            "radii": radii,
-            "depth":depth,
-            "means3D_deform":means3D_final,
-            "vertice_deform": vertice_deform,
-            "shadows_mean":shadows_mean,    
-            "shadows_std":shadows_std,
-            "projections":gaussian_projections,
-            "rotations": rotations_deform,
-            "opacities": opacity_final,
-            "shadows": shadow_scalars,
-            "vertice_projections": vertice_projections,
-            }
+
+    return RenderResults(render=rendered_image,
+                         viewspace_points=screenspace_points,
+                         visibility_filter=radii > 0,
+                         radii=radii,
+                         depth=depth,
+                         means3D_deform=means3D_final,
+                         vertice_deform=vertice_deform,
+                         shadows_mean=shadows_mean,
+                         shadows_std=shadows_std,
+                         projections=gaussian_projections,
+                         rotations=rotations_deform,
+                         opacities=opacity_final,
+                         shadows=shadow_scalars,
+                         vertice_projections=vertice_projections)
 

@@ -16,9 +16,9 @@ from random import randint
 
 import torch.linalg
 
-from scene_reconstruction.train_utils import regularization, image_losses
+from scene_reconstruction.train_utils import regularization, image_losses, densification
 from utils.loss_utils import l1_loss, ssim
-from gaussian_renderer import render, network_gui
+from gaussian_renderer import render, network_gui, RenderResults
 import sys
 from scene_reconstruction.scene import Scene
 
@@ -121,6 +121,7 @@ def scene_reconstruction(dataset, opt: OptimizationParams, hyper, pipe, testing_
     first_iter += 1
     lpips_model = lpips.LPIPS(net="alex").cuda()
     video_cams = scene.video_cameras
+    cameras_extent = scene.cameras_extent
     o3d_knn_dists, o3d_knn_indices, knn_weights = None, None, None
 
     for iteration in range(first_iter, final_iter + 1):
@@ -193,26 +194,25 @@ def scene_reconstruction(dataset, opt: OptimizationParams, hyper, pipe, testing_
 
             render_pkg = render(viewpoint_cam, gaussians, simulator, pipe, background,
                                 no_shadow=user_args.no_shadow, render_static=static)
-            image, viewspace_point_tensor, visibility_filter, radii = render_pkg["render"], render_pkg[
-                "viewspace_points"], render_pkg["visibility_filter"], render_pkg["radii"]
+            image = render_pkg.render
             images.append(image.unsqueeze(0))
             gt_image = viewpoint_cam.original_image.cuda()
             gt_images.append(gt_image.unsqueeze(0))
-            radii_list.append(radii.unsqueeze(0))
-            visibility_filter_list.append(visibility_filter.unsqueeze(0))
-            viewspace_point_tensor_list.append(viewspace_point_tensor)
+            radii_list.append(render_pkg.radii.unsqueeze(0))
+            visibility_filter_list.append(render_pkg.visibility_filter.unsqueeze(0))
+            viewspace_point_tensor_list.append(render_pkg.viewspace_points)
             if masks is not None:
                 masks.append(viewpoint_cam.mask.cuda().unsqueeze(0))
-            all_means_3D_deform.append(render_pkg["means3D_deform"][None, :, :])
-            all_vertice_deform.append(render_pkg["vertice_deform"][None, :, :])
-            all_projections.append(render_pkg["projections"][None, :, :])
-            all_rotations.append(norm_quat(render_pkg["rotations"][None, :, :]))
-            all_opacities.append(render_pkg["opacities"][None, :])
-            shadows = render_pkg["shadows"]
+            all_means_3D_deform.append(render_pkg.means3D_deform[None, :, :])
+            all_vertice_deform.append(render_pkg.vertice_deform[None, :, :])
+            all_projections.append(render_pkg.projections[None, :, :])
+            all_rotations.append(norm_quat(render_pkg.rotations[None, :, :]))
+            all_opacities.append(render_pkg.opacities[None, :])
+            shadows = render_pkg.shadows
             if shadows is not None:
                 all_shadows.append(shadows[None, :])
 
-            all_shadows_std.append(render_pkg["shadows_std"])
+            all_shadows_std.append(render_pkg.shadows_std)
 
         all_projections = torch.cat(all_projections, 0)
         all_rotations = torch.cat(all_rotations, 0)
@@ -238,9 +238,10 @@ def scene_reconstruction(dataset, opt: OptimizationParams, hyper, pipe, testing_
             wandb.log({"train/psnr": psnr_, "train/loss": loss}, step=iteration)
             wandb.log({"train/num_gaussians": gaussians.num_gaussians}, step=iteration)
 
-        viewspace_point_tensor_grad = torch.zeros_like(viewspace_point_tensor)
+        viewspace_point_tensor_grad = torch.zeros_like(viewspace_point_tensor_list[0])
         for idx in range(0, len(viewspace_point_tensor_list)):
             viewspace_point_tensor_grad = viewspace_point_tensor_grad + viewspace_point_tensor_list[idx].grad
+
         iter_end.record()
 
         with torch.no_grad():
@@ -282,32 +283,11 @@ def scene_reconstruction(dataset, opt: OptimizationParams, hyper, pipe, testing_
                                           timer.get_elapsed_time())
                     # total_images.append(to8b(temp_image).transpose(1,2,0))
             timer.start()
+
             # Densification
             if iteration < opt.densify_until_iter:
-                # Keep track of max radii in image-space for pruning
-                gaussians.max_radii2D[visibility_filter] = torch.max(gaussians.max_radii2D[visibility_filter],
-                                                                     radii[visibility_filter])
-                gaussians.add_densification_stats(viewspace_point_tensor_grad, visibility_filter)
-
-                if stage == "coarse":
-                    opacity_threshold = opt.opacity_threshold_coarse
-                    densify_threshold = opt.densify_grad_threshold_coarse
-                else:
-                    opacity_threshold = opt.opacity_threshold_fine_init - iteration * (
-                                opt.opacity_threshold_fine_init - opt.opacity_threshold_fine_after) / (
-                                            opt.densify_until_iter)
-                    densify_threshold = opt.densify_grad_threshold_fine_init - iteration * (
-                                opt.densify_grad_threshold_fine_init - opt.densify_grad_threshold_after) / (
-                                            opt.densify_until_iter)
-
-                if iteration > opt.densify_from_iter and iteration % opt.densification_interval == 0:
-                    size_threshold = 20 if iteration > opt.opacity_reset_interval else None
-
-                    gaussians.densify(densify_threshold, opacity_threshold, scene.cameras_extent, size_threshold)
-                if iteration > opt.pruning_from_iter and iteration % opt.pruning_interval == 0:
-                    size_threshold = 20 if iteration > opt.opacity_reset_interval else None
-
-                    gaussians.prune(densify_threshold, opacity_threshold, scene.cameras_extent, size_threshold)
+                densification(gaussians, iteration, visibility_filter, radii,
+                              viewspace_point_tensor_grad, opt, cameras_extent)
 
                 if iteration % opt.opacity_reset_interval == 0 or (
                         dataset.white_background and iteration == opt.densify_from_iter):
@@ -392,7 +372,7 @@ def prepare_output_and_logger(expname):
 
 
 def training_report(tb_writer, iteration, loss_dict, loss, elapsed, testing_iterations, scene: Scene, gaussians: MultiGaussianMesh, simulator: MeshSimulator,
-                    rander_args, stage, user_args=None, save_test_images=True):
+                    render_args: RenderResults, stage, user_args=None, save_test_images=True):
     if tb_writer:
         tb_writer.add_scalar(f'{stage}/train_loss_patches/l1_loss', loss_dict['l1'], iteration)
         tb_writer.add_scalar(f'{stage}/train_loss_patchestotal_loss', loss.item(), iteration)
@@ -414,8 +394,7 @@ def training_report(tb_writer, iteration, loss_dict, loss, elapsed, testing_iter
                 psnr_test = 0.0
                 for idx, viewpoint in enumerate(config['cameras']):
                     image = torch.clamp(
-                        render(viewpoint, gaussians, simulator, *rander_args, no_shadow=user_args.no_shadow)[
-                            "render"], 0.0, 1.0)
+                        render(viewpoint, gaussians, simulator, *render_args, no_shadow=user_args.no_shadow).render, 0.0, 1.0)
                     gt_image = torch.clamp(viewpoint.original_image.to("cuda"), 0.0, 1.0)
                     if tb_writer and (idx < 5):
                         tb_writer.add_images(

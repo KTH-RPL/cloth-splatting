@@ -246,3 +246,28 @@ def regularization(all_vertice_deform, gaussians, opt: OptimizationParams, stati
     #     loss += tv_loss
 
     return loss
+
+
+def densification(gaussians, iteration, visibility_filter, radii, viewspace_point_tensor_grad, opt: OptimizationParams, cameras_extent):
+
+    gaussians.max_radii2D[visibility_filter] = torch.max(gaussians.max_radii2D[visibility_filter],
+                                                         radii[visibility_filter])
+    gaussians.add_densification_stats(viewspace_point_tensor_grad, visibility_filter)
+
+
+    opacity_threshold = opt.opacity_threshold_fine_init - iteration * (
+            opt.opacity_threshold_fine_init - opt.opacity_threshold_fine_after) / (
+                            opt.densify_until_iter)
+    densify_threshold = opt.densify_grad_threshold_fine_init - iteration * (
+            opt.densify_grad_threshold_fine_init - opt.densify_grad_threshold_after) / (
+                            opt.densify_until_iter)
+
+    if iteration > opt.densify_from_iter and iteration % opt.densification_interval == 0:
+        size_threshold = 20 if iteration > opt.opacity_reset_interval else None
+
+        gaussians.densify(densify_threshold, opacity_threshold, cameras_extent, size_threshold)
+    if iteration > opt.pruning_from_iter and iteration % opt.pruning_interval == 0:
+        size_threshold = 20 if iteration > opt.opacity_reset_interval else None
+
+        gaussians.prune(densify_threshold, opacity_threshold, cameras_extent, size_threshold)
+
