@@ -16,7 +16,7 @@ from random import randint
 
 import torch.linalg
 
-from scene_reconstruction.train_utils import regularization
+from scene_reconstruction.train_utils import regularization, image_losses
 from utils.loss_utils import l1_loss, ssim
 from gaussian_renderer import render, network_gui
 import sys
@@ -225,31 +225,11 @@ def scene_reconstruction(dataset, opt: OptimizationParams, hyper, pipe, testing_
         image_tensor = torch.cat(images, 0)
         gt_image_tensor = torch.cat(gt_images, 0)
         mask_tensor = torch.cat(masks, 0) if masks is not None else None
-        # Loss
-        Ll1 = l1_loss(image_tensor, gt_image_tensor, mask_tensor)
-        # Ll1 = l2_loss(image, gt_image)
 
         psnr_ = psnr(image_tensor, gt_image_tensor).mean().double()
 
         # norm
-
-        loss = Ll1
-
-        n_cams = len(viewpoint_cams)
-
-
-        # TODO Double check if SSIM with mask works.
-        if opt.lambda_dssim != 0:
-            if mask_tensor is None:
-                ssim_loss = ssim(image_tensor, gt_image_tensor)
-                loss += opt.lambda_dssim * (1.0 - ssim_loss)
-            else:
-                ssim_map = ssim(image_tensor, gt_image_tensor, return_map=True)
-                loss += opt.lambda_dssim * ((1.0 - ssim_map) * mask_tensor).mean()
-        # if opt.lambda_lpips != 0:
-        #     lpipsloss = lpips_loss(image_tensor, gt_image_tensor, lpips_model)
-        #     loss += opt.lambda_lpips * lpipsloss
-
+        loss, loss_dict = image_losses(image_tensor, gt_image_tensor, opt, mask_tensor)
         loss += regularization(all_vertice_deform, gaussians, opt, static)
 
         loss.backward()
@@ -257,7 +237,6 @@ def scene_reconstruction(dataset, opt: OptimizationParams, hyper, pipe, testing_
         if user_args.use_wandb and stage == "fine":
             wandb.log({"train/psnr": psnr_, "train/loss": loss}, step=iteration)
             wandb.log({"train/num_gaussians": gaussians.num_gaussians}, step=iteration)
-
 
         viewspace_point_tensor_grad = torch.zeros_like(viewspace_point_tensor)
         for idx in range(0, len(viewspace_point_tensor_list)):
@@ -279,7 +258,7 @@ def scene_reconstruction(dataset, opt: OptimizationParams, hyper, pipe, testing_
 
             # Log and save
             timer.pause()
-            training_report(tb_writer, iteration, Ll1, loss, iter_start.elapsed_time(iter_end),
+            training_report(tb_writer, iteration, loss_dict, loss, iter_start.elapsed_time(iter_end),
                             testing_iterations, scene, gaussians, simulator, [pipe, background], stage,
                             user_args=user_args, save_test_images=user_args.save_test_images)
             if iteration in saving_iterations:
@@ -412,10 +391,10 @@ def prepare_output_and_logger(expname):
     return tb_writer
 
 
-def training_report(tb_writer, iteration, Ll1, loss, elapsed, testing_iterations, scene: Scene, gaussians: MultiGaussianMesh, simulator: MeshSimulator,
+def training_report(tb_writer, iteration, loss_dict, loss, elapsed, testing_iterations, scene: Scene, gaussians: MultiGaussianMesh, simulator: MeshSimulator,
                     rander_args, stage, user_args=None, save_test_images=True):
     if tb_writer:
-        tb_writer.add_scalar(f'{stage}/train_loss_patches/l1_loss', Ll1.item(), iteration)
+        tb_writer.add_scalar(f'{stage}/train_loss_patches/l1_loss', loss_dict['l1'], iteration)
         tb_writer.add_scalar(f'{stage}/train_loss_patchestotal_loss', loss.item(), iteration)
         tb_writer.add_scalar(f'{stage}/iter_time', elapsed, iteration)
 

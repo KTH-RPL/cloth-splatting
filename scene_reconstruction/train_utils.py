@@ -44,6 +44,33 @@ from utils.scene_utils import render_training_image
 to8b = lambda x: (255 * np.clip(x.cpu().numpy(), 0, 1)).astype(np.uint8)
 
 
+def image_losses(image_tensor, gt_image_tensor, opt: OptimizationParams, mask_tensor=None) -> (torch.Tensor, dict[str, float]):
+    loss_dict = dict()
+
+    # Loss
+    l1 = l1_loss(image_tensor, gt_image_tensor, mask_tensor)
+    # Ll1 = l2_loss(image, gt_image)
+    loss_dict['l1'] = l1.item()
+    loss = l1
+
+    # TODO Double check if SSIM with mask works.
+    if opt.lambda_dssim != 0:
+        if mask_tensor is None:
+            ssim_val = ssim(image_tensor, gt_image_tensor)
+            ssim_loss = 1.0 - ssim_val
+        else:
+            ssim_map = ssim(image_tensor, gt_image_tensor, return_map=True)
+            ssim_loss = ((1.0 - ssim_map) * mask_tensor).mean()
+        loss_dict['ssim_loss'] = ssim_loss.item()
+        loss += opt.lambda_dssim * ssim_loss
+
+    # if opt.lambda_lpips != 0:
+    #     lpipsloss = lpips_loss(image_tensor, gt_image_tensor, lpips_model)
+    #     loss += opt.lambda_lpips * lpipsloss
+
+    return loss, loss_dict
+
+
 def regularization(all_vertice_deform, gaussians, opt: OptimizationParams, static=False):
 
     n_cams = all_vertice_deform.shape[0]
