@@ -360,3 +360,207 @@ def densification(gaussians, iteration, visibility_filter, radii, viewspace_poin
 
         gaussians.prune(densify_threshold, opacity_threshold, cameras_extent, size_threshold)
 
+
+class SingleStepOptimizer:
+
+    scene_info: SceneInfo
+    initial_mesh: torch_geometric.data.Data
+    mesh_predictions: list[torch_geometric.data.Data]
+    camera_data: MDNerfDataset
+
+    gaussians: MultiGaussianMesh
+
+    def __init__(self,
+                 opt_params: OptimizationParams,
+                 pipeline_params: PipelineParams,
+                 meshnet_params: MeshnetParams,
+                 model_params: ModelParams,
+                 args, max_time=50, save_path=None):
+
+        self.args = args
+        self.opt_params = opt_params
+        self.meshnet_params = meshnet_params
+        self.pipeline_params = pipeline_params
+        self.model_params = model_params
+        self.max_time = max_time
+
+        self.save_path = save_path if save_path is not None else self.model_params.model_path
+
+        self.static_iterations = opt_params.static_reconst_iteration
+
+        bg_color = [1, 1, 1] if self.model_params.white_background else [0, 0, 0]
+        self.background = torch.tensor(bg_color, dtype=torch.float32, device="cuda")
+
+    def initialize(self):
+        (self.scene_info, self.initial_mesh, self.mesh_predictions) = read_cloth_scene_info(self.model_params.source_path,
+                                                                                            self.model_params.white_background,
+                                                                                            eval=False)
+        self.camera_data = MDNerfDataset(self.scene_info.train_cameras, self.args)
+
+        self.gaussians = MultiGaussianMesh(self.model_params.sh_degree)
+        self.gaussians.from_mesh(self.initial_mesh, self.scene_info.nerf_normalization['radius'], self.opt_params.gaussian_init_factor)
+
+        self.gaussians.training_setup(self.opt_params)
+
+    def update_data(self, max_time=None):
+        self.scene_info, self.initial_mesh, self.mesh_predictions = read_cloth_scene_info(self.model_params.source_path, self.model_params.white_background)
+        self.camera_data = MDNerfDataset(self.scene_info.train_cameras, self.args)
+
+        if max_time is not None:
+            self.camera_data.ordered_data = self.camera_data.ordered_data[:, :max_time]
+            self.camera_data.n_times = max_time
+
+    def static_reconstruction(self, train_steps=None, bar=True):
+
+        # load simulator
+        mesh_pos = torch.concat([mesh.pos.unsqueeze(0) for mesh in self.mesh_predictions], dim=0)
+        simulator = ResidualMeshSimulator(mesh_pos, self.max_time, device='cuda')
+        simulator.train()
+        meshnet_optimizer = torch.optim.Adam(simulator.parameters(), lr=self.meshnet_params.lr_init)
+
+
+        self.static_iterations = train_steps if train_steps is not None else self.static_iterations
+
+        print(f"Starting static reconstruction for {self.static_iterations} steps.")
+        progress_bar = tqdm(range(1, self.static_iterations), desc=f"Static reconstruction")
+
+        ema_loss_for_log = 0
+
+        for iteration in range(1, self.static_iterations+1):
+
+            viewpoint_cams = [self.camera_data.get_one_item(iteration % len(self.camera_data), 0)]
+            psnr_, loss, loss_dict = train_step(iteration, viewpoint_cams, self.gaussians, simulator,
+                                                meshnet_optimizer, self.pipeline_params, self.opt_params,
+                                                self.scene_info.nerf_normalization['radius'], self.background,
+                                                static=True, white_background=self.model_params.white_background,
+                                                user_args=self.args)
+            # Report test and samples of training set
+            if iteration % int(self.static_iterations / 10) == 0:
+                torch.cuda.empty_cache()
+                # individual to get only a single view at a time
+                for j in range(3):
+                    l1_test = 0.0
+                    psnr_test = 0.0
+                    l = [self.camera_data.get_one_item(j, 0)]
+                    for ele in l:
+                        image = torch.clamp(
+                            render(ele, self.gaussians, simulator, self.pipeline_params,
+                                   no_shadow=True, bg_color=self.background).render, 0.0, 1.0)
+                        gt_image = torch.clamp(ele.original_image.to("cuda"), 0.0, 1.0)
+                        l1_test += l1_loss(image, gt_image).mean().double()
+                        psnr_test += psnr(image, gt_image).mean().double()
+
+                        save_path = os.path.join(self.save_path, "test_renders")
+                        os.makedirs(save_path, exist_ok=True)
+                        save_im = np.transpose(gt_image.detach().cpu().numpy(), (1, 2, 0))
+                        save_im = (save_im * 255).astype(np.uint8)
+                        imageio.imsave(
+                            os.path.join(save_path, f"0_{iteration}_{j}_gt.png"),
+                            save_im)
+                        save_im = np.transpose(image.squeeze().detach().cpu().numpy(), (1, 2, 0))
+                        save_im = (save_im * 255).astype(np.uint8)
+                        imageio.imsave(
+                            os.path.join(save_path, f"0_{iteration}_{j}_render.png"),
+                            save_im)
+
+            ema_loss_for_log = ema_loss_for_log * 0.99 + loss.item() * 0.01
+            if iteration % 10 == 0:
+                progress_bar.set_postfix({"Loss": f"{ema_loss_for_log:.{7}f}",
+                                          "psnr": f"{psnr_:.{2}f}",
+                                          "point": f"{self.gaussians.num_gaussians}"})
+                progress_bar.update(10)
+
+        self.updated_gaussians = copy.deepcopy(self.gaussians)
+        self.simulator = simulator
+
+        return self.gaussians, simulator
+
+    def update_mesh_predictions(self, train_steps=None, bar=True):
+
+        updated_gaussians = copy.deepcopy(self.gaussians)
+
+        # load simulator
+        mesh_pos = torch.concat([mesh.pos.unsqueeze(0) for mesh in self.mesh_predictions], dim=0)
+        simulator = ResidualMeshSimulator(mesh_pos, self.max_time, device='cuda')
+        simulator.train()
+
+        meshnet_optimizer = torch.optim.Adam(simulator.parameters(),
+                                             lr=self.meshnet_params.lr_init)
+
+        iterations = train_steps if train_steps is not None else self.opt_params.iterations
+
+        max_time = self.camera_data.n_times
+        progress_bar = tqdm(range(1, iterations), desc=f"Time {max_time}")
+
+        ema_loss_for_log = 0
+        for iteration in range(self.static_iterations+1, self.static_iterations+iterations+1):
+            if max_time >=3:
+                time_id = randint(0, max_time - 2)
+                viewpoint_cams = [
+                    self.camera_data.get_one_item(iteration % len(self.camera_data), time_id - 1 + i) for i in range(3)
+                ]
+            else:
+                viewpoint_cams = [
+                    self.camera_data.get_one_item(iteration % len(self.camera_data), 0),
+                    self.camera_data.get_one_item(iteration % len(self.camera_data), 1)
+                ]
+
+            psnr_, loss, loss_dict = train_step(iteration, viewpoint_cams, updated_gaussians, simulator,
+                                                meshnet_optimizer, self.pipeline_params, self.opt_params,
+                                                self.scene_info.nerf_normalization['radius'], self.background,
+                                                static=False, white_background=self.model_params.white_background,
+                                                user_args=self.args)
+
+            # Report test and samples of training set
+            if iteration % int(train_steps / 10) == 0:
+                torch.cuda.empty_cache()
+                # individual to get only a single view at a time
+                for j in range(3):
+                        l1_test = 0.0
+                        psnr_test = 0.0
+                        l = [self.camera_data.get_one_item(j, max_time - 1)]
+                        for ele in l:
+
+                            image = torch.clamp(
+                                render(ele, updated_gaussians, simulator, self.pipeline_params,
+                                       no_shadow=True, bg_color=self.background).render, 0.0, 1.0)
+                            gt_image = torch.clamp(ele.original_image.to("cuda"), 0.0, 1.0)
+                            l1_test += l1_loss(image, gt_image).mean().double()
+                            psnr_test += psnr(image, gt_image).mean().double()
+
+                            save_path = os.path.join(self.save_path, "test_renders".format(iteration))
+                            os.makedirs(save_path, exist_ok=True)
+                            save_im = np.transpose(gt_image.detach().cpu().numpy(), (1, 2, 0))
+                            save_im = (save_im * 255).astype(np.uint8)
+                            imageio.imsave(
+                                os.path.join(save_path, f"{max_time}_{iteration}_{j}_gt.png"),
+                                save_im)
+                            save_im = np.transpose(image.squeeze().detach().cpu().numpy(), (1, 2, 0))
+                            save_im = (save_im * 255).astype(np.uint8)
+                            imageio.imsave(
+                                os.path.join(save_path, f"{max_time}_{iteration}_{j}_render.png"),
+                                save_im)
+
+            ema_loss_for_log = ema_loss_for_log * 0.99 + loss.item() * 0.01
+            if iteration % 10 == 0:
+                progress_bar.set_postfix({"Loss": f"{ema_loss_for_log:.{7}f}",
+                                          "psnr": f"{psnr_:.{2}f}",
+                                          "point": f"{self.gaussians.num_gaussians}"})
+                progress_bar.update(10)
+
+        self.updated_gaussians = updated_gaussians
+        self.simulator = simulator
+
+        return updated_gaussians, simulator
+
+    def save(self):
+
+        iteration = self.static_iterations + self.opt_params.iterations
+        print("Saving Gaussians")
+        point_cloud_path = os.path.join(self.save_path, "point_cloud/iteration_{}".format(iteration))
+        self.updated_gaussians.save_ply(point_cloud_path)
+
+        meshnet_path = os.path.join(self.save_path, 'meshnet')
+        os.makedirs(meshnet_path, exist_ok=True)
+        self.simulator.save(os.path.join(meshnet_path, 'model-' + str(iteration) + '.pt'))
+
