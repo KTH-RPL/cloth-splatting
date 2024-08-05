@@ -145,13 +145,6 @@ def scene_reconstruction(dataset, opt_params: OptimizationParams, pipeline_param
 
         iter_start.record()
 
-        gaussians.update_learning_rate(iteration)
-
-        # Every 1000 its we increase the levels of SH up to a maximum degree
-        # TODO make this a hyperparameter
-        if iteration % 1000 == 0:
-            gaussians.oneupSHdegree()
-
         # Pick a random Camera
         if not viewpoint_stack:
             viewpoint_stack = scene.train_cameras

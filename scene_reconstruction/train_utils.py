@@ -8,6 +8,7 @@
 #
 # For inquiries contact  george.drettakis@inria.fr
 #
+import copy
 
 import imageio
 import random
@@ -254,6 +255,13 @@ def train_step(iteration, viewpoint_cams: list[Camera], gaussians: MultiGaussian
                meshnet_optimizer, pipeline_params: PipelineParams, opt_params: OptimizationParams,
                cameras_extent, background, static=False, white_background=False, user_args=None):
 
+    gaussians.update_learning_rate(iteration)
+
+    # Every 1000 its we increase the levels of SH up to a maximum degree
+    # TODO make this a hyperparameter
+    if iteration % 1000 == 0:
+        gaussians.oneupSHdegree()
+
     images = []
     gt_images = []
     radii_list = []
@@ -311,7 +319,7 @@ def train_step(iteration, viewpoint_cams: list[Camera], gaussians: MultiGaussian
                 print("reset opacity")
                 gaussians.reset_opacity()
 
-        if iteration % opt_params.bary_cleanup:
+        if iteration % opt_params.bary_cleanup == 0:
             gaussians.cleanup_barycentric_coordinates()
 
         # Optimizer step
@@ -351,62 +359,4 @@ def densification(gaussians, iteration, visibility_filter, radii, viewspace_poin
         size_threshold = 20 if iteration > opt.opacity_reset_interval else None
 
         gaussians.prune(densify_threshold, opacity_threshold, cameras_extent, size_threshold)
-
-#
-# class SingleStepOptimizer:
-# #
-#     scene_info: SceneInfo
-#     initial_mesh: torch_geometric.data.Data
-#     mesh_predictions: list[torch_geometric.data.Data]
-#     camera_data: MDNerfDataset
-#
-#     gaussians: MultiGaussianMesh
-#     simulator: ResidualMeshSimulator
-#
-#     def __init__(self, sh_degree, opt_params: OptimizationParams,
-#                  pipeline_params: PipelineParams, meshnet_params: MeshnetParams, args, white_background=False):
-#
-#         self.source_path = args.source_path
-#         self.white_background = args.white_background
-#         self.args = args
-#         self.opt_params = opt_params
-#         self.meshnet_params = meshnet_params
-#         self.pipeline_params = pipeline_params
-#
-#         self.white_background = white_background
-#         self.sh_degree = sh_degree
-#
-#         bg_color = [1, 1, 1] if white_background else [0, 0, 0]
-#         self.background = torch.tensor(bg_color, dtype=torch.float32, device="cuda")
-#
-#     def initialize(self):
-#         (self.scene_info, self.initial_mesh, self.mesh_predictions) = read_cloth_scene_info(self.source_path,
-#                                                                                             self.white_background)
-#         self.camera_data = MDNerfDataset(self.scene_info.train_cameras, self.args)
-#
-#         # load simulator
-#         mesh_pos = torch.concat([mesh.pos.unsqueeze(0) for mesh in self.mesh_predictions], dim=0)
-#         simulator = ResidualMeshSimulator(mesh_pos, device='cuda')
-#         simulator.train()
-#
-#         self.gaussians = MultiGaussianMesh(self.dataset.sh_degree)
-#         self.gaussians.from_mesh(self.initial_mesh, self.scene_info.nerf_normalization['radius'], self.opt.gaussian_init_factor)
-#
-#         self.gaussians.training_setup(self.opt_params)
-#
-#     def update_data(self):
-#         self.scene_info, self.initial_mesh, self.mesh_predictions = read_cloth_scene_info(self.args.source_path, self.args.white_background)
-#         self.camera_data = MDNerfDataset(self.scene_info.train_cameras, self.args)
-#
-#     def initial_reconstruction(self):
-#         meshnet_optimizer = torch.optim.Adam(self.simulator.parameters(),
-#                                              lr=self.meshnet_params.lr_init)
-#
-#         for iteration in range(self.opt_params.static_reconst_iteration):
-#             viewpoint_cams = [self.camera_data.get_one_item(iteration % len(self.camera_data), 0)]
-#             train_step(iteration, viewpoint_cams, self.gaussians, self.simulator, meshnet_optimizer, self.pipeline_params,
-#                        self.opt_params, self.scene_info.nerf_normalization['radius'], self.background, static=True, white_background=self.white_background, user_args=self.args)
-#
-#     def update_mesh_predictions(self):
-#         pass
 
