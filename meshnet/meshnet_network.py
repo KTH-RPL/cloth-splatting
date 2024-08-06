@@ -348,7 +348,7 @@ class ResidualMeshSimulator(torch.nn.Module):
         self.hidden = torch.nn.Linear(256, 256, device=device)
         self.output = torch.nn.Linear(256, n_nodes*3, device=device)
         nn.init.normal_(self.output.weight, 0.0, 0.00001)
-        nn.init.normal_(self.output.bias, 0.0, 0.000001)
+        nn.init.constant_(self.output.bias, 0.0)
 
     def forward(self, time_vector):
         time = time_vector[0, :]
