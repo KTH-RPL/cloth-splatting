@@ -361,7 +361,7 @@ class SingleStepOptimizer:
                  pipeline_params: PipelineParams,
                  meshnet_params: MeshnetParams,
                  model_params: ModelParams,
-                 args, max_time=50, save_path=None):
+                 args, max_time=-1, save_path=None):
 
         self.args = args
         self.opt_params = opt_params
