@@ -326,7 +326,7 @@ class ResidualMeshSimulator(torch.nn.Module):
 
     def __init__(self,
                  mesh_predictions: torch.Tensor,
-                 n_times: float = -1,
+                 n_times: int = -1,
                  device='cuda'):
 
         super().__init__()
@@ -335,9 +335,10 @@ class ResidualMeshSimulator(torch.nn.Module):
         # self.mesh_predictions = self.mesh_predictions[0].unsqueeze(0).repeat(self.mesh_predictions.shape[0], 1, 1)
 
         if n_times > 0:
-            self.n_times = self.mesh_predictions.shape[0]
-        else:
             self.n_times = n_times
+        else:
+            self.n_times = self.mesh_predictions.shape[0]
+
         self.time_delta = 1.0 / (self.n_times - 1)
 
         n_nodes = self.mesh_predictions.shape[1]
