@@ -79,40 +79,31 @@ def render(viewpoint_camera, pc: MultiGaussianMesh, simulator: ResidualMeshSimul
     # add deformation to each points
     # deformation = pc.get_deformation
     means3D = pc.get_xyz()
-
     means2D = screenspace_points
-    opacity = pc._opacity
-
-    # If precomputed 3d covariance is provided, use it. If not, then it will be computed from
-    # scaling / rotation by the rasterizer.
-    scales = None
-    rotations = None
-    cov3D_precomp = None
     if pipe.compute_cov3D_python:
         cov3D_precomp = pc.get_covariance(scaling_modifier)
+        scales = None
     else:
-        scales = pc._scaling
-        rotations = pc._rotation
-    #deformation_point = pc._deformation_table
-    shadow_scalars = None
+        cov3D_precomp = None
+        scales = pc.get_scaling
+    opacity = pc.get_opacity
 
-    # TODO Implement the shadow scalars
-    scales_deform, opacity_deform = scales, opacity
+    shadow_scalars = None
 
     time = torch.tensor(viewpoint_camera.time).to(pc.mesh.pos.device).repeat(pc.mesh.pos.shape[0], 1)
 
     if render_static:
         vertice_deform = pc.mesh.pos
         means3D_deform = means3D
-        rotations_deform = rotations
+        rotations_deform = pc.get_rotation()
     else:
         vertice_deform = simulator(time_vector=time)
         means3D_deform = pc.get_xyz(vertice_deform)
         rotations_deform = pc.get_rotation(vertice_deform)
     rotations_final = rotations_deform
     means3D_final = means3D_deform
-    scales_final = scales_deform
-    opacity_final = opacity_deform
+    scales_final = scales
+    opacity_final = opacity
 
     # means3D_final = torch.zeros_like(means3D)
     # rotations_final = torch.zeros_like(rotations)
@@ -134,10 +125,7 @@ def render(viewpoint_camera, pc: MultiGaussianMesh, simulator: ResidualMeshSimul
                      vertice_deform=vertice_deform.cpu().numpy(),
                      rotations=rotations_final.cpu().numpy(),
                      vertice_rotations=pc.get_vertice_rotation(vertice_deform).cpu().numpy())
-            
-    scales_final = pc.scaling_activation(scales_final)
-    rotations_final = pc.rotation_activation(rotations_final)
-    opacity = pc.opacity_activation(opacity)
+
     # print(opacity.max())
     # If precomputed colors are provided, use them. Otherwise, if it is desired to precompute colors
     # from SHs in Python, do it. If not, then SH -> RGB conversion will be done by rasterizer.
