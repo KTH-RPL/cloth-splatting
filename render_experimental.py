@@ -104,8 +104,8 @@ def get_mask(projections=None,gaussian_positions=None,depth=None,cam_center=None
     assert cam_center is not None
     
     # get the visible projections
-    mask_in_image = (projections[:,0] >= 0) & (projections[:,0] < height) & (projections[:,1] >= 0) & \
-            (projections[:,1] < width)
+    mask_in_image = (projections[:,0] >= 0) & (projections[:,0] < width) & (projections[:,1] >= 0) & \
+            (projections[:,1] < height)
     
     depth_mask = np.ones_like(mask_in_image, dtype=bool)
     
