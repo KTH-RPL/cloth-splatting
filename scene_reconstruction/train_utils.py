@@ -316,8 +316,8 @@ def train_step(iteration, viewpoint_cams: list[Camera], gaussians: MultiGaussian
                 meshnet_optimizer.zero_grad()
             else:
                 gaussians.optimizer.step()
-                gaussians.optimizer.zero_grad(set_to_none=True)
                 meshnet_optimizer.step()
+                gaussians.optimizer.zero_grad(set_to_none=True)
                 meshnet_optimizer.zero_grad()
 
     return psnr_, loss, loss_dict
@@ -392,23 +392,22 @@ class SingleStepOptimizer:
 
         # load simulator
         mesh_pos = torch.concat([mesh.pos.unsqueeze(0) for mesh in self.mesh_predictions], dim=0)
-        self.simulator = ResidualMeshSimulator(mesh_pos, device='cuda')
+        self.simulator = ResidualMeshSimulator(mesh_pos, n_times=self.max_time, device='cuda')
         self.simulator.train()
 
-
-    def update_data(self, max_time=None):
+    def update_data(self, max_time=-1):
         self.scene_info, self.initial_mesh, self.mesh_predictions = read_cloth_scene_info(self.model_params.source_path, self.model_params.white_background)
         self.camera_data = MDNerfDataset(self.scene_info.train_cameras, self.args)
 
-        if max_time is not None:
+        if max_time > 0:
             self.camera_data.ordered_data = self.camera_data.ordered_data[:, :max_time]
             self.camera_data.n_times = max_time
+            self.mesh_predictions = self.mesh_predictions[:max_time]
 
         # load simulator
         mesh_pos = torch.concat([mesh.pos.unsqueeze(0) for mesh in self.mesh_predictions], dim=0)
-        self.simulator = ResidualMeshSimulator(mesh_pos, device='cuda')
+        self.simulator = ResidualMeshSimulator(mesh_pos, self.max_time, device='cuda')
         self.simulator.train()
-
 
     def static_reconstruction(self, train_steps=None, bar=True):
 
