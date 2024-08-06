@@ -80,15 +80,7 @@ def regularization(all_vertice_deform, gaussians, opt: OptimizationParams, stati
 
     loss = torch.zeros([], device="cuda")
 
-    # TODO Gradually add the loss terms back!
-    # l_momentum = 0.0
-    # if n_cams >= 3:
-    #     ## MOMENTUM LOSS
-    #     l_momentum = all_means_3D_deform[2, :, :] - 2 * all_means_3D_deform[1, :, :] + all_means_3D_deform[0, :, :]
-    #     l_momentum = torch.linalg.norm(l_momentum, dim=-1, ord=1).mean()  # mean l1 norm
-    #
-    # l_deformation_mag = 0.0
-    if n_cams >= 3:
+    if not static and opt.lambda_deform_mag > 0. and n_cams >= 3:
         l_deformation_delta_0 = all_vertice_deform[1, :, :] - all_vertice_deform[0, :, :]
         l_deformation_mag_0 = torch.linalg.norm(l_deformation_delta_0, dim=-1).mean()  # mean l2 norm
         l_deformation_delta_1 = all_vertice_deform[2, :, :] - all_vertice_deform[1, :, :]
@@ -96,13 +88,18 @@ def regularization(all_vertice_deform, gaussians, opt: OptimizationParams, stati
         l_deformation_mag = 0.5 * (l_deformation_mag_0 + l_deformation_mag_1)
         loss += opt.lambda_deform_mag * l_deformation_mag
 
-    if not static:
+    if not static and opt.lambda_rigid > 0:
         edge_displacement = all_vertice_deform[:, gaussians.mesh.edge_index[1]] - all_vertice_deform[:,
                                                                                   gaussians.mesh.edge_index[0]]
         deformed_norm = torch.linalg.norm(edge_displacement, dim=-1, keepdim=True)
         static_norm = gaussians.edge_norm.unsqueeze(0).expand(n_cams, -1, -1)
         l_rigid = torch.nn.functional.l1_loss(static_norm, deformed_norm)
         loss += opt.lambda_rigid * l_rigid
+
+    if not static and opt.lambda_momentum > 0 and n_cams >= 3:
+        l_momentum = all_vertice_deform[2, :, :] - 2 * all_vertice_deform[1, :, :] + all_vertice_deform[0, :, :]
+        l_momentum = torch.linalg.norm(l_momentum, dim=-1, ord=1).mean()  # mean l1 norm
+        loss += opt.lambda_momentum * l_momentum.mean()
 
     # l_iso, l_rigid, l_shadow_mean, l_shadow_delta, l_spring = None, None, None, None, None
     # diff_dimensions = False
@@ -216,16 +213,11 @@ def regularization(all_vertice_deform, gaussians, opt: OptimizationParams, stati
     #                        "train/l_shadow_mean": l_shadow_mean, "train/l_shadow_delta": l_shadow_delta},
     #                       step=iteration)
     #
-    # # add momentum term to loss
-    # if user_args.lambda_momentum > 0 and stage == "fine":
-    #     loss += user_args.lambda_momentum * l_momentum.mean()
+    # add momentum term to loss
     #
     # # add isometric term to loss
     # if user_args.lambda_isometric > 0 and stage == "fine" and l_iso is not None:
     #     loss += user_args.lambda_isometric * l_iso.mean()
-    #
-    # if user_args.lambda_rigidity > 0 and stage == "fine" and l_rigid is not None:
-    #     loss += user_args.lambda_rigidity * l_rigid.mean()
     #
     # if user_args.lambda_shadow_mean > 0 and stage == "fine" and l_shadow_mean is not None:
     #     loss += user_args.lambda_shadow_mean * l_shadow_mean.mean()
@@ -233,14 +225,8 @@ def regularization(all_vertice_deform, gaussians, opt: OptimizationParams, stati
     # if user_args.lambda_shadow_delta > 0 and stage == "fine" and l_shadow_delta is not None:
     #     loss += user_args.lambda_shadow_delta * l_shadow_delta.mean()
     #
-    # if user_args.lambda_deformation_mag > 0 and stage == "fine":
-    #     loss += user_args.lambda_deformation_mag * l_deformation_mag.mean()
-    #
     # if user_args.lambda_spring > 0 and stage == "fine" and l_spring is not None:
     #     loss += user_args.lambda_spring * l_spring.mean()
-    #
-    # if user_args.use_wandb and stage == "fine":
-    #     wandb.log({"train/l_momentum": l_momentum, "train/l_deform_mag": l_deformation_mag}, step=iteration)
     #
     # if stage == "fine" and hyper.time_smoothness_weight != 0:
     #     # tv_loss = 0

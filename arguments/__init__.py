@@ -130,6 +130,7 @@ class OptimizationParams(ParamGroup):
         self.lambda_lpips = 0
         self.lambda_rigid = 0.3
         self.lambda_deform_mag = 0.01
+        self.lambda_momentum = 0.1
         self.weight_constraint_init= 1
         self.weight_constraint_after = 0.2
         self.weight_decay_iteration = 5000

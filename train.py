@@ -395,7 +395,6 @@ if __name__ == "__main__":
     # momentum term
     parser.add_argument("--reg_iter", default=5000, type=int)
     parser.add_argument("--knn_update_iter", default=1000, type=int)
-    parser.add_argument("--lambda_momentum", default=0.0, type=float)
 
     # isometric loss
     parser.add_argument("--lambda_isometric", default=0.0, type=float)
