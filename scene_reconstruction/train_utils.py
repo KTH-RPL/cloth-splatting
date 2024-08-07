@@ -253,7 +253,6 @@ def train_step(iteration, viewpoint_cams: list[Camera], gaussians: MultiGaussian
     radii_list = []
     visibility_filter_list = []
     viewspace_point_tensor_list = []
-    all_means_3D_deform = []
     all_vertice_deform = []
     masks = [] if viewpoint_cams[0].mask is not None else None
 
@@ -270,7 +269,6 @@ def train_step(iteration, viewpoint_cams: list[Camera], gaussians: MultiGaussian
         viewspace_point_tensor_list.append(render_pkg.viewspace_points)
         if masks is not None:
             masks.append(viewpoint_cam.mask.cuda().unsqueeze(0))
-        all_means_3D_deform.append(render_pkg.means3D_deform[None, :, :])
         all_vertice_deform.append(render_pkg.vertice_deform[None, :, :])
 
     all_vertice_deform = torch.cat(all_vertice_deform, 0)
@@ -400,9 +398,9 @@ class SingleStepOptimizer:
         self.camera_data = MDNerfDataset(self.scene_info.train_cameras, self.args)
 
         if max_time > 0:
-            self.camera_data.ordered_data = self.camera_data.ordered_data[:, :max_time]
-            self.camera_data.n_times = max_time
-            self.mesh_predictions = self.mesh_predictions[:max_time]
+            self.camera_data.ordered_data = self.camera_data.ordered_data[:, :max_time+1]
+            self.camera_data.n_times = max_time+1
+            self.mesh_predictions = self.mesh_predictions[:max_time+1]
 
         # load simulator
         mesh_pos = torch.concat([mesh.pos.unsqueeze(0) for mesh in self.mesh_predictions], dim=0)
@@ -476,14 +474,13 @@ class SingleStepOptimizer:
 
         max_time = self.camera_data.n_times
 
-        probabilities = np.linspace(0.5, 1.5, max_time-2)
-        probabilities /= probabilities.sum()
-
         progress_bar = tqdm(range(1, iterations), desc=f"Time {max_time} from step {self.last_iters}")
 
         ema_loss_for_log = 0
         for iteration in range(self.last_iters+1, self.last_iters+iterations+1):
-            if max_time >=3:
+            if max_time >= 3:
+                probabilities = np.linspace(0.5, 1.5, max_time - 2)
+                probabilities /= probabilities.sum()
                 time_id = random.choices(range(max_time-2), weights=probabilities, k=1)[0]
                 viewpoint_cams = [
                     self.camera_data.get_one_item(iteration % len(self.camera_data), time_id - 1 + i) for i in range(3)
@@ -499,36 +496,36 @@ class SingleStepOptimizer:
                                                 self.scene_info.nerf_normalization['radius'], self.background,
                                                 static=False, white_background=self.model_params.white_background,
                                                 user_args=self.args)
-
+            with torch.no_grad():
             # Report test and samples of training set
-            if iteration % int(train_steps / 4) == 0:
-                torch.cuda.empty_cache()
-                # individual to get only a single view at a time
-                for j in range(3):
-                        l1_test = 0.0
-                        psnr_test = 0.0
-                        l = [self.camera_data.get_one_item(j, max_time - 1)]
-                        for ele in l:
+                if iteration % int(train_steps / 4) == 0:
+                    torch.cuda.empty_cache()
+                    # individual to get only a single view at a time
+                    for j in range(3):
+                            l1_test = 0.0
+                            psnr_test = 0.0
+                            l = [self.camera_data.get_one_item(j, max_time - 1)]
+                            for ele in l:
 
-                            image = torch.clamp(
-                                render(ele, self.gaussians, self.simulator, self.pipeline_params,
-                                       no_shadow=True, bg_color=self.background).render, 0.0, 1.0)
-                            gt_image = torch.clamp(ele.original_image.to("cuda"), 0.0, 1.0)
-                            l1_test += l1_loss(image, gt_image).mean().double()
-                            psnr_test += psnr(image, gt_image).mean().double()
+                                image = torch.clamp(
+                                    render(ele, self.gaussians, self.simulator, self.pipeline_params,
+                                           no_shadow=True, bg_color=self.background).render, 0.0, 1.0)
+                                gt_image = torch.clamp(ele.original_image.to("cuda"), 0.0, 1.0)
+                                l1_test += l1_loss(image, gt_image).mean().double()
+                                psnr_test += psnr(image, gt_image).mean().double()
 
-                            save_path = os.path.join(self.save_path, "test_renders".format(iteration))
-                            os.makedirs(save_path, exist_ok=True)
-                            save_im = np.transpose(gt_image.detach().cpu().numpy(), (1, 2, 0))
-                            save_im = (save_im * 255).astype(np.uint8)
-                            imageio.imsave(
-                                os.path.join(save_path, f"{max_time}_{iteration}_{j}_gt.png"),
-                                save_im)
-                            save_im = np.transpose(image.squeeze().detach().cpu().numpy(), (1, 2, 0))
-                            save_im = (save_im * 255).astype(np.uint8)
-                            imageio.imsave(
-                                os.path.join(save_path, f"{max_time}_{iteration}_{j}_render.png"),
-                                save_im)
+                                save_path = os.path.join(self.save_path, "test_renders".format(iteration))
+                                os.makedirs(save_path, exist_ok=True)
+                                save_im = np.transpose(gt_image.detach().cpu().numpy(), (1, 2, 0))
+                                save_im = (save_im * 255).astype(np.uint8)
+                                imageio.imsave(
+                                    os.path.join(save_path, f"{max_time}_{iteration}_{j}_gt.png"),
+                                    save_im)
+                                save_im = np.transpose(image.squeeze().detach().cpu().numpy(), (1, 2, 0))
+                                save_im = (save_im * 255).astype(np.uint8)
+                                imageio.imsave(
+                                    os.path.join(save_path, f"{max_time}_{iteration}_{j}_render.png"),
+                                    save_im)
 
             ema_loss_for_log = ema_loss_for_log * 0.99 + loss.item() * 0.01
             if iteration % 10 == 0:
