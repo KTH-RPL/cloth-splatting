@@ -359,14 +359,14 @@ class SingleStepOptimizer:
                  pipeline_params: PipelineParams,
                  meshnet_params: MeshnetParams,
                  model_params: ModelParams,
-                 args, max_time=-1, save_path=None):
+                 args, n_times_max=-1, save_path=None):
 
         self.args = args
         self.opt_params = opt_params
         self.meshnet_params = meshnet_params
         self.pipeline_params = pipeline_params
         self.model_params = model_params
-        self.max_time = max_time
+        self.n_times_max = n_times_max
 
         self.save_path = save_path if save_path is not None else self.model_params.model_path
 
@@ -390,21 +390,21 @@ class SingleStepOptimizer:
 
         # load simulator
         mesh_pos = torch.concat([mesh.pos.unsqueeze(0) for mesh in self.mesh_predictions], dim=0)
-        self.simulator = ResidualMeshSimulator(mesh_pos, n_times=self.max_time, device='cuda')
+        self.simulator = ResidualMeshSimulator(mesh_pos, n_times=self.n_times_max, device='cuda')
         self.simulator.train()
 
-    def update_data(self, max_time=-1):
+    def update_data(self, n_times=-1):
         self.scene_info, self.initial_mesh, self.mesh_predictions = read_cloth_scene_info(self.model_params.source_path, self.model_params.white_background)
         self.camera_data = MDNerfDataset(self.scene_info.train_cameras, self.args)
 
-        if max_time > 0:
-            self.camera_data.ordered_data = self.camera_data.ordered_data[:, :max_time+1]
-            self.camera_data.n_times = max_time+1
-            self.mesh_predictions = self.mesh_predictions[:max_time+1]
+        if n_times > 0:
+            self.camera_data.ordered_data = self.camera_data.ordered_data[:, :n_times]
+            self.camera_data.n_times = n_times
+            self.mesh_predictions = self.mesh_predictions[:n_times]
 
         # load simulator
         mesh_pos = torch.concat([mesh.pos.unsqueeze(0) for mesh in self.mesh_predictions], dim=0)
-        self.simulator = ResidualMeshSimulator(mesh_pos, self.max_time, device='cuda')
+        self.simulator = ResidualMeshSimulator(mesh_pos, self.n_times_max, device='cuda')
         self.simulator.train()
 
     def static_reconstruction(self, train_steps=None, bar=True):
@@ -472,16 +472,16 @@ class SingleStepOptimizer:
 
         iterations = train_steps if train_steps is not None else self.opt_params.iterations
 
-        max_time = self.camera_data.n_times
+        n_times = self.camera_data.n_times
 
-        progress_bar = tqdm(range(1, iterations), desc=f"Time {max_time} from step {self.last_iters}")
+        progress_bar = tqdm(range(1, iterations), desc=f"Time {n_times-1} from step {self.last_iters}")
 
         ema_loss_for_log = 0
         for iteration in range(self.last_iters+1, self.last_iters+iterations+1):
-            if max_time >= 3:
-                probabilities = np.linspace(0.5, 1.5, max_time - 2)
+            if n_times >= 3:
+                probabilities = np.linspace(0.5, 1.5, n_times - 2)
                 probabilities /= probabilities.sum()
-                time_id = random.choices(range(max_time-2), weights=probabilities, k=1)[0]
+                time_id = random.choices(range(n_times-2), weights=probabilities, k=1)[0]
                 viewpoint_cams = [
                     self.camera_data.get_one_item(iteration % len(self.camera_data), time_id - 1 + i) for i in range(3)
                 ]
@@ -504,7 +504,7 @@ class SingleStepOptimizer:
                     for j in range(3):
                             l1_test = 0.0
                             psnr_test = 0.0
-                            l = [self.camera_data.get_one_item(j, max_time - 1)]
+                            l = [self.camera_data.get_one_item(j, n_times-1)]
                             for ele in l:
 
                                 image = torch.clamp(
@@ -519,12 +519,12 @@ class SingleStepOptimizer:
                                 save_im = np.transpose(gt_image.detach().cpu().numpy(), (1, 2, 0))
                                 save_im = (save_im * 255).astype(np.uint8)
                                 imageio.imsave(
-                                    os.path.join(save_path, f"{max_time}_{iteration}_{j}_gt.png"),
+                                    os.path.join(save_path, f"{n_times-1}_{iteration}_{j}_gt.png"),
                                     save_im)
                                 save_im = np.transpose(image.squeeze().detach().cpu().numpy(), (1, 2, 0))
                                 save_im = (save_im * 255).astype(np.uint8)
                                 imageio.imsave(
-                                    os.path.join(save_path, f"{max_time}_{iteration}_{j}_render.png"),
+                                    os.path.join(save_path, f"{n_times-1}_{iteration}_{j}_render.png"),
                                     save_im)
 
             ema_loss_for_log = ema_loss_for_log * 0.99 + loss.item() * 0.01
