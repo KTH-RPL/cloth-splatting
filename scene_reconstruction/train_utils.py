@@ -485,11 +485,17 @@ class SingleStepOptimizer:
                 viewpoint_cams = [
                     self.camera_data.get_one_item(iteration % len(self.camera_data), time_id - 1 + i) for i in range(3)
                 ]
-            else:
+            elif n_times == 2:
                 viewpoint_cams = [
                     self.camera_data.get_one_item(iteration % len(self.camera_data), 0),
                     self.camera_data.get_one_item(iteration % len(self.camera_data), 1)
                 ]
+            elif n_times == 1:
+                viewpoint_cams = [
+                    self.camera_data.get_one_item(iteration % len(self.camera_data), 0)
+                ]
+            else:
+                ValueError("No cameras to train on")
 
             psnr_, loss, loss_dict = train_step(iteration, viewpoint_cams, self.gaussians, self.simulator,
                                                 meshnet_optimizer, self.pipeline_params, self.opt_params,
