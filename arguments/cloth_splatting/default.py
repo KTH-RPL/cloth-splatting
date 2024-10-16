@@ -33,6 +33,9 @@ OptimizationParams = dict(
     position_lr_static=0.0016,
     static_reconst=True,
     static_reconst_iteration=1500,
+
+    lambda_dssim=0.05
+
 )
 
 ModelParams = dict(
