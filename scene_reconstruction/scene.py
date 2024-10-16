@@ -36,7 +36,7 @@ class MeshSceneInfo(NamedTuple):
     mesh_predictions: list[torch_geometric.data.Data]
 
 
-def read_cloth_scene_info(path, white_background, eval, extension=".png", time_skip=None, view_skip=None,
+def read_cloth_scene_info(path, white_background, eval=True, extension=".png", time_skip=None, view_skip=None,
                           single_cam_video=False) -> Tuple[
     MeshSceneInfo, torch_geometric.data.Data, list[torch_geometric.data.Data]]:
     if not os.path.exists(path):

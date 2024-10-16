@@ -85,7 +85,6 @@ class MDNerfDataset(Dataset):
             all_steps = [self.get_one_item(view_id,i) for i in range(self.n_times)]
        
         return all_steps
-        
 
     def get_one_item(self, view_id, time_id):
         # try:
@@ -94,20 +93,19 @@ class MDNerfDataset(Dataset):
         #     FovX = focal2fov(self.dataset.focal[0], image.shape[2])
         #     FovY = focal2fov(self.dataset.focal[0], image.shape[1])
         # except:
-        caminfo = self.ordered_data[view_id,time_id]
+        caminfo = self.ordered_data[view_id, time_id]
         
         if caminfo is None:
             # find a different view_id with the same time_id
-            time_caminfos = self.ordered_data[:,time_id]
+            time_caminfos = self.ordered_data[:, time_id]
             # remove None
-            time_caminfos = time_caminfos[time_caminfos != None]
+            time_caminfos = time_caminfos[time_caminfos is not None]
             # randomly choose one
             caminfo = np.random.choice(time_caminfos)
 
             if caminfo is None:
                 raise ValueError("No cam info found, this should not happen. Something is wrong in the provided data.")
-        
-        
+
         image = caminfo.image
         R = caminfo.R
         T = caminfo.T

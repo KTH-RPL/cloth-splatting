@@ -222,7 +222,7 @@ def render_set(model_path, name, iteration, views, gaussians: GaussianMesh, simu
         else:
             all_times = np.concatenate((all_times, np.array([view_time])),axis=0)
             all_trajs = np.concatenate((all_trajs, trajs), axis=0)
-                
+
         if args.show_flow:
             traj_img = np.zeros((view.image_height,view.image_width,3))
             current_projections = projections.to("cpu").numpy()[gt_idxs]
@@ -231,12 +231,14 @@ def render_set(model_path, name, iteration, views, gaussians: GaussianMesh, simu
             current_mask, image_mask = get_mask(projections=current_projections,gaussian_positions=gaussian_positions,depth=depth,cam_center=cam_center,
             height=view.image_height,width=view.image_width)
 
-            rendering =  np.ascontiguousarray(rendering)   
+            rendering = np.ascontiguousarray(rendering)
+            gt = tonumpy(view.original_image[0:3]).transpose(1, 2, 0)
             # show scatter on the currently visible gaussians
             for i in range(n_points)[::args.flow_skip]:
                 if current_mask[i] and opacity_mask[i]:
                     color_idx = (i//args.flow_skip) % len(colors)
                     cv2.circle(rendering,(int(current_projections[i,0]),int(current_projections[i,1])),2,colors[color_idx],-1)
+                    cv2.circle(gt,(int(current_projections[i,0]),int(current_projections[i,1])),2,colors[color_idx],-1)
                     # rendering[int(current_projections[i,0]),int(current_projections[i,1]),:] = colors[color_idx]
 
             if view_id != view.view_id:
@@ -258,11 +260,11 @@ def render_set(model_path, name, iteration, views, gaussians: GaussianMesh, simu
                         prev_gaussians = all_trajs[j]
                         prev_projections = project(all_trajs[j], view).cpu().numpy()
                         prev_time = all_times[j]
-                        
+
                         current_gaussians = all_trajs[j+1]
                         current_projections = project(all_trajs[j+1], view).cpu().numpy()
                         current_time = all_times[j+1]
-                        
+
                         prev_mask, _ = get_mask(projections=prev_projections,gaussian_positions=prev_gaussians,depth=depth,cam_center=cam_center,
                         height=view.image_height,width=view.image_width)
                         current_mask, _ = get_mask(projections=current_projections,gaussian_positions=current_gaussians,depth=depth,cam_center=cam_center,
@@ -277,29 +279,30 @@ def render_set(model_path, name, iteration, views, gaussians: GaussianMesh, simu
                                     # draw teh same but a line
                                     traj_img = cv2.arrowedLine(traj_img,(int(prev_projections[i,0]),int(prev_projections[i,1])),(int(current_projections[i,0]),int(current_projections[i,1])),colors[color_idx],arrow_tickness)
                 rendering[traj_img > 0] = traj_img[traj_img > 0]
+                gt[traj_img > 0] = traj_img[traj_img > 0]
                 prev_projections = current_projections
                 prev_mask = current_mask
                 prev_time = view_time
             view_id = view.view_id
-            
-        
+
         render_list.append(rendering)
 
         if name in ["train", "test"]:
-            gt = view.original_image[0:3, :, :]
+            # gt_img = view.original_image[0:3, :, :]
             # torchvision.utils.save_image(gt, os.path.join(gts_path, '{0:05d}'.format(idx) + ".png"))
             gt_list.append(gt)
 
     video_imgs = [to8(img) for img in render_list]
-    video_gt_imgs = [to8(img.detach().cpu().numpy().transpose(1, 2, 0)) for img in gt_list]
+    video_gt_imgs = [to8(img) for img in gt_list]
     save_imgs = [torch.tensor((img.transpose(2,0,1)),device="cpu") for img in render_list ]
+    save_gt_imgs = [torch.tensor((img.transpose(2,0,1)),device="cpu") for img in gt_list ]
 
     time2=time()
     print("FPS:",(len(views)-1)/(time2-time1))
     count = 0
     print("writing training images.")
-    if len(gt_list) != 0:
-        for image in tqdm(gt_list):
+    if len(save_gt_imgs) != 0:
+        for image in tqdm(save_gt_imgs):
             torchvision.utils.save_image(image, os.path.join(gts_path, '{0:05d}'.format(count) + ".png"))
             count+=1
     count = 0
