@@ -12,7 +12,7 @@ from meshnet.model_utils import optimizer_to, NodeType, datas_to_graph_pos, data
 from meshnet.model_utils import get_velocity_noise
 import meshnet.dataloader_sim as data_loader
 from meshnet.data_utils import compute_edge_features
-from meshnet.viz import plot_mesh, plot_mesh_and_points, plot_mesh_predictions, plot_losses
+from meshnet.viz import plot_mesh, plot_mesh_and_points, plot_mesh_predictions, plot_losses, plot_pcd_list
 from tqdm import tqdm
 from absl import flags
 from absl import app
@@ -24,6 +24,7 @@ import matplotlib.pyplot as plt
 import h5py
 import torch.optim as optim
 import torch_geometric
+import copy
 os.environ['CUDA_LAUNCH_BLOCKING'] = '1'
 
 # an instance that transforms face-based graph to edge-based graph. Edge features are auto-computed using "Cartesian" and "Distance"
@@ -264,10 +265,14 @@ def rollout(simulator, ds, features, nsteps, device, input_sequence_length, dt, 
         current_velocities[-1] = predicted_next_velocity.to(device)
         
     print(f"Time for rollout: {time.time() - time__now}")
+<<<<<<< HEAD
     # Prediction with shape (time, nnodes, dim)
+=======
+    # Prediction with shape (time, nnodes, dim)    predictions = torch.stack(predictions)
+>>>>>>> 9b63d7a (Commit minor changes)
     predictions = torch.stack(predictions)
-
-    loss = (predictions - ground_truth_velocities.to(device)) ** 2
+    
+    loss = (predictions- ground_truth_velocities.to(device)) ** 2
     # loss_dumb_prediction = ((velocities[:-input_sequence_length].clone().to(device) - ground_truth_positions.to(device)) ** 2).mean().cpu().numpy()
     # print(f'Loss: {loss.mean()}, dumb loss: {loss_dumb_prediction}')
 
@@ -314,11 +319,23 @@ def validate(simulator, ds, device, FLAGS, use_wandb=False, future=10):
         if use_wandb:
             return images, losses_im
             
-def update_prediction(velocity_noise, velocity, pred_acc, init_position, edge_index, particle_actions, device, input_sequence_length):
+def update_prediction(velocity_noise, velocity, pred_acc, init_position, edge_index, old_particle_actions, particle_actions, device, input_sequence_length):
     if velocity_noise is not None:
         velocity = velocity + velocity_noise
     new_vel = velocity[:, -3:] + pred_acc
-    new_pos = init_position + new_vel
+    
+    # reset the known vel to the original instead of the predicted
+    new_vel[old_particle_actions!= 0] = old_particle_actions[old_particle_actions!= 0].to(torch.float64)
+    
+  
+    # update all the particles except the grasped particles (already there) by adding predicted velocity
+    new_pos = init_position.clone()  
+    new_pos[particle_actions == 0] += new_vel[particle_actions == 0]
+    
+    # add the action to the grasped particles
+    new_pos += particle_actions    
+    
+    # compute new edge features
     # displacement, norm = compute_edge_features(new_pos, edge_index)
     temp_graph  =  Data(
             edge_index=edge_index,
@@ -328,11 +345,18 @@ def update_prediction(velocity_noise, velocity, pred_acc, init_position, edge_in
     edge_features = temp_graph.edge_attr
     
     # add action to the conditioning
-    new_action_vel = particle_actions + particle_actions  # to handle multiple steps[i]                
+    # OLD CODE, probably not working
+    # new_action_vel = particle_actions + particle_actions  # to handle multiple steps[i]                
+    # velocity[:, :-3] = velocity[:, 3:]
+    # velocity[:, -3:] = new_action_vel.to(device)
+ 
+    # sift the velocity and add action to the conditioning  
+    new_action_vel = copy.deepcopy(velocity[:, -3:]).to(torch.float64)     #+ particle_actions   
+    new_action_vel[particle_actions!= 0] = particle_actions[particle_actions!= 0].to(torch.float64) 
     velocity[:, :-3] = velocity[:, 3:]
     velocity[:, -3:] = new_action_vel.to(device)
     
-    return velocity.to(torch.float32), edge_features.to(torch.float32), init_position
+    return velocity, edge_features, new_pos
 
 def train(simulator, device, FLAGS):
 
@@ -364,7 +388,8 @@ def train(simulator, device, FLAGS):
     # exp_name = f"Fig_test_val_berzelius{FLAGS.berzelius}"
 
     # exp_name = f"cloth-splatting-SIM-curr{FLAGS.curriculum}-astep{FLAGS.action_steps}-propagation{FLAGS.message_passing}-noise{FLAGS.noise_std}-history{FLAGS.input_sequence_length}-batch{FLAGS.batch_size}"
-    exp_name = f"cloth-splatting-SIM-curr{FLAGS.curriculum}-astep{FLAGS.action_steps}-propagation{FLAGS.message_passing}-noise{FLAGS.noise_std}-nodes{FLAGS.num_samples}"
+    prefix = 'REB_'
+    exp_name = f"{prefix}cloth-splatting-SIM-curr{FLAGS.curriculum}-astep{FLAGS.action_steps}-propagation{FLAGS.message_passing}-noise{FLAGS.noise_std}-nodes{FLAGS.num_samples}"
     wandb.init(project="cloth-splatting", config=FLAGS, name=exp_name)
     
     print(f"Experimen name: {exp_name}")
@@ -372,6 +397,9 @@ def train(simulator, device, FLAGS):
     for param_name in ['curriculum', 'action_steps', 'message_passing', 'noise_std', 'input_sequence_length', 'batch_size']:
         print(f"{param_name}: {flag_values[param_name]}")
 
+    if FLAGS.berzelius:
+        FLAGS.data_path = FLAGS.data_path.replace('.', '/proj/berzelius-2023-364/data/cloth_splatting', 1)
+        FLAGS.data_val_path = FLAGS.data_val_path.replace('.', '/proj/berzelius-2023-364/data/cloth_splatting', 1)
 
     # Set model and its path to save, and load model.
     # If model_path does not exist create new directory and begin training.
@@ -494,7 +522,8 @@ def train(simulator, device, FLAGS):
                     
                     # Update states with predictions for the next step
                     if FLAGS.future_sequence_length > 1 and f < FLAGS.future_sequence_length - 1:
-                        velocity, edge_features, init_position = update_prediction(velocity_noise, velocity, pred_acc, init_position, edge_index, particle_actions[:, f+1], device, input_sequence_length)
+                        unnormalized_predicted_accelerations = simulator._output_normalizer.inverse(pred_acc)
+                        velocity, edge_features, init_position = update_prediction(velocity_noise, velocity, unnormalized_predicted_accelerations, init_position, edge_index, particle_actions[:, f], particle_actions[:, f+1], device, input_sequence_length)
                 
                 
                 # Computes the gradient of loss
@@ -583,12 +612,14 @@ if __name__=='__main__':
     # flags.DEFINE_string('data_val_path', './sim_datasets/test_dataset/TOWEL', help='The dataset directory.')
     
     
-    flags.DEFINE_string('data_path', './sim_datasets/train_dataset_0415/TOWEL', help='The dataset directory.')
-    flags.DEFINE_string('data_val_path', './sim_datasets/test_dataset_0415/TOWEL', help='The dataset directory.')
+    # flags.DEFINE_string('data_path', './sim_datasets/train_dataset_0415/TOWEL', help='The dataset directory.')
+    # flags.DEFINE_string('data_val_path', './sim_datasets/test_dataset_0415/TOWEL', help='The dataset directory.')
+    
+    flags.DEFINE_string('data_path', './sim_datasets/train_dataset_0702/TOWEL', help='The dataset directory.')
+    flags.DEFINE_string('data_val_path', './sim_datasets/test_dataset_0702/TOWEL', help='The dataset directory.')
     
     flags.DEFINE_integer('berzelius', 0, help='Whether it is running on berzelius or not.')
     flags.DEFINE_integer('wandb', 1, help='Whether it is using wandb to log or not.')
-
 
 
     flags.DEFINE_integer('batch_size', 32, help='The batch size.')
@@ -606,10 +637,14 @@ if __name__=='__main__':
 
     # Model parameters and training details
     flags.DEFINE_integer('input_sequence_length', int(2), help='Lenght of the sequence in input, default 1.')
+<<<<<<< HEAD
     flags.DEFINE_integer('future_sequence_length', int(1), help='Lenght of the sequence in input, default 1.')
+=======
+    flags.DEFINE_integer('future_sequence_length', int(3), help='Lenght of the sequence in input, default 1.')
+>>>>>>> 9b63d7a (Commit minor changes)
     flags.DEFINE_integer('curriculum', int(0), help='Whether to use curriculum learning or not, wehre curriculum is the # of future steps to predict.')
    
-    flags.DEFINE_integer('action_steps', int(3), help='Number of actions to predict. Default 1.')
+    flags.DEFINE_integer('action_steps', int(1), help='Number of actions to predict. Default 1.')
     flags.DEFINE_integer('message_passing', int(15), help='Number of message passing steps. Default 15')
     flags.DEFINE_float('noise_std', float(0), help='Noise standard deviation.')
     flags.DEFINE_integer('node_type_embedding_size', int(1), help='Number of different types of nodes. So far only 1.')
@@ -624,7 +659,7 @@ if __name__=='__main__':
     flags.DEFINE_integer('knn', int(10), help='Number of neighbor to construct the graph.')
     flags.DEFINE_integer('delaunay', int(1), help='Whether to use delaunay to traingulation or not.')
     flags.DEFINE_integer('subsample', int(1), help='Whether to subsample or not the initial set of points.')
-    flags.DEFINE_integer('num_samples', int(100), help='Number of points to subsample. Default 300')
+    flags.DEFINE_integer('num_samples', int(200), help='Number of points to subsample. Default 300')
 
     FLAGS = flags.FLAGS
 

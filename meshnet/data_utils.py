@@ -5,7 +5,9 @@ import torch
 import torch_geometric
 
 import matplotlib.pyplot as plt
+import matplotlib.pyplot as plt
 import scipy
+from scipy.spatial import cKDTree, Delaunay, KDTree
 from scipy.spatial import cKDTree, Delaunay, KDTree
 import glob
 from meshnet.viz import plot_mesh, plot_pcd_list, create_gif
@@ -13,11 +15,14 @@ import h5py
 import math
 import copy
 
+import copy
+
 
 # function to load json data
 def load_traj(data_path):
     traj = np.load(data_path, allow_pickle=True)['traj']
     return traj
+
 
 
 def load_sim_traj(data_path, action_steps=1, load_keys=['pos', 'vel', 'actions', 'trajectory_params', 'gripper_pos', 'pick', 'place']):
@@ -45,6 +50,37 @@ def load_sim_traj(data_path, action_steps=1, load_keys=['pos', 'vel', 'actions',
                         data[key] = np.concatenate([pre_actions, last_actions], 0)             
 
     return data
+
+
+# def load_sim_traj(data_path, action_steps=1, load_keys=['pos', 'vel', 'actions', 'trajectory_params', 'gripper_pos', 'pick', 'place']):
+#     file_path = glob.glob(os.path.join(data_path, '*h5'))[0]
+#     with h5py.File(file_path, 'r') as f:
+#         data = {}
+#         for key in load_keys:
+#             dataset = f[key]
+#             if isinstance(dataset.dtype, h5py.special_dtype):
+#                 data[key] = [item.decode('utf-8') for item in dataset[:]]  # Convert bytes back to strings
+#             else:
+#                 if action_steps == 1:
+#                     data[key] = np.array(dataset)
+#                 else:
+#                     if key in ['trajectory_params', 'pick', 'place']:
+#                         data[key] = np.array(dataset)
+#                     elif key in ['pos', 'vel', 'gripper_pos']:
+#                         # take one every action steps
+#                         data[key] = np.array(dataset[::action_steps])
+#                     elif key == 'actions':
+#                         # take one every action steps but sum the actions
+#                         actions = np.array(dataset)
+#                         # this code accounts for the scenarios where the number of actions are not divisible by action_steps
+#                         if actions.shape[0] % action_steps == 0:
+#                             data[key] = actions.reshape(-1, action_steps, 3).sum(1)
+#                         else:
+#                             last_actions = actions[-(actions.shape[0] % action_steps):].sum(0)[None, :]
+#                             pre_actions = actions[:-(actions.shape[0] % action_steps)].reshape(-1, action_steps, 3).sum(1)
+#                             data[key] = np.concatenate([pre_actions, last_actions], 0)
+
+#     return data
 
 
 # def load_sim_traj(data_path, action_steps=1, load_keys=['pos', 'vel', 'actions', 'trajectory_params', 'gripper_pos', 'pick', 'place']):
@@ -126,9 +162,14 @@ def farthest_point_sampling(points, num_samples):
 
 
 
-def get_data_traj(data_path, load_keys, params, sim_data=False):  
-    dt, k, delaunay, subsample, num_samples, input_length_sequence, action_steps = params             
-    traj_data = load_sim_traj(data_path, action_steps, load_keys)
+def get_data_traj(data_path, load_keys, params, observations=None, sim_data=False, sampled_points_indices=None, rw_processing=True):  
+    dt, k, delaunay, subsample, num_samples, input_length_sequence, action_steps = params    
+    
+    # if observation is none than we load them from the path
+    if observations is None:
+        traj_data = load_sim_traj(data_path, action_steps, load_keys)
+    else:
+        traj_data = copy.deepcopy(observations)
     offset = np.zeros(3)
     scale = 1
         
@@ -139,32 +180,35 @@ def get_data_traj(data_path, load_keys, params, sim_data=False):
         traj = traj_data['pos']
     else:
         traj = traj_data['pos']
-        # add the gripper position that is covererd and not included in the trajectory
-        grippers =   (copy.deepcopy(traj_data['gripper_pos'])+np.asarray([[0.0, -0.03, 0.02]]))[:, np.newaxis, :]
-        traj = np.concatenate([traj, grippers], 1)
-        traj_data['actions'] =  np.ones_like(traj_data['gripper_pos']) 
-        traj_data['actions'][1:] =  traj_data['gripper_pos'][1:] - traj_data['gripper_pos'][:-1]
-        # scale = 2.4
-        # offset = traj[0].mean(0)*scale
-        scale = 1
-        offset = np.zeros(3)
-        traj = np.asarray([gaussian_smoothing(tra*scale - offset, k=20, sigma=0.1) for tra in traj])
-        # set z to zero
-        traj[:, :, 2] = 0
+        
+        if rw_processing:
+            # add the gripper position that is covererd and not included in the trajectory
+            grippers =   (copy.deepcopy(traj_data['gripper_pos'])+np.asarray([[0.0, -0.03, 0.02]]))[:, np.newaxis, :]
+            traj = np.concatenate([traj, grippers], 1)
+            traj_data['actions'] =  np.ones_like(traj_data['gripper_pos']) 
+            traj_data['actions'][1:] =  traj_data['gripper_pos'][1:] - traj_data['gripper_pos'][:-1]
+            # scale = 2.4
+            # offset = traj[0].mean(0)*scale
+            scale = 1
+            offset = np.zeros(3)
+            traj = np.asarray([gaussian_smoothing(tra*scale - offset, k=20, sigma=0.1) for tra in traj])
+            # set z to zero
+            traj[:, :, 2] = 0
+        
         
         
         
     
     trajectory_data = process_traj(traj, dt, k, delaunay, 
                                     subsample=subsample, num_samples=num_samples, 
-                                    sim_data=False, norm_threshold=0.1) # sim_data is false if we flip the trajectory before
+                                    sim_data=False, norm_threshold=0.1, sampled_points_indeces=sampled_points_indices) # sim_data is false if we flip the trajectory before
     
-    # shit the actions as we store them as a_t, s_t+1
-    
+    # shift the actions as we store them as a_t, s_t+1    
     trajectory_data['actions'] = traj_data['actions'][1:]*scale
     trajectory_data["actions"] = np.concatenate([ np.zeros_like(trajectory_data["actions"][0])[None, :], trajectory_data['actions']],0)
 
     # gripper data
+    trajectory_data['gripper_pos'] = traj_data['gripper_pos']*scale - offset
     trajectory_data['gripper_pos'] = traj_data['gripper_pos']*scale - offset
     trajectory_data['gripper_vel'] = (traj_data['gripper_pos'][1:] - traj_data['gripper_pos'][:-1]) / dt
     trajectory_data["gripper_vel"] = np.concatenate([np.zeros_like(trajectory_data["gripper_vel"][0])[None, :],  trajectory_data['gripper_vel']],0)
@@ -173,8 +217,12 @@ def get_data_traj(data_path, load_keys, params, sim_data=False):
     trajectory_data['pick'] = traj_data['pick']*scale - offset
     trajectory_data['place'] = traj_data['place']*scale - offset
     # trajectory_data['trajectory_params'] = traj_data['trajectory_params']   
+    trajectory_data['pick'] = traj_data['pick']*scale - offset
+    trajectory_data['place'] = traj_data['place']*scale - offset
+    # trajectory_data['trajectory_params'] = traj_data['trajectory_params']   
     
     # find at time 0 the particle that is the closest to the grasped one by closest euclidean distance
+    grasped_particle_idx = np.argmin(np.linalg.norm(trajectory_data['pos'][0] - trajectory_data['pick'], axis=1))
     grasped_particle_idx = np.argmin(np.linalg.norm(trajectory_data['pos'][0] - trajectory_data['pick'], axis=1))
     # update the node type of the grasped particle
     trajectory_data['node_type'][:, grasped_particle_idx] = 1
@@ -186,6 +234,7 @@ def get_data_traj(data_path, load_keys, params, sim_data=False):
             trajectory_data[d] = expand_init_data(trajectory_data[d], input_length_sequence)
             
     return trajectory_data
+
 
 def expand_init_data(data, input_length_sequence):
     # expand the data to have the same length of the input_length_sequence
@@ -230,20 +279,24 @@ def gaussian_smoothing(point_cloud, k=20, sigma=0.1):
           
 
 
-def process_traj(traj, dt, k=3, delaunay=False, subsample=False, num_samples=300, sim_data=False, norm_threshold=0.01):
-    trajectory_data = {"pos": [], "velocity": [], "node_type": [], "edge_index": [], "edge_displacement": [], 'edge_norm': [], 'edge_norm': [], 'edge_faces': []}
+def process_traj(traj, dt, k=3, delaunay=False, subsample=False, num_samples=300, sim_data=False, norm_threshold=0.01, sampled_points_indeces=None, edge_index=None, faces=None):
+    trajectory_data = {"pos": [], "velocity": [], "node_type": [], "edge_index": [], "edge_displacement": [], 
+                       'edge_norm': [], 'edge_norm': [], 'edge_faces': [], 'sampled_point_indeces': []}
     
-
-    if subsample:
-        if sim_data:
-            sampled_points_indeces = farthest_point_sampling(traj[0], num_samples)
+    if sampled_points_indeces is None:
+        if subsample:
+            if sim_data:
+                sampled_points_indeces = farthest_point_sampling(traj[0], num_samples)
+            else:
+                sampled_points_indeces = farthest_point_sampling(traj[0], num_samples)
         else:
-            sampled_points_indeces = farthest_point_sampling(traj[0], num_samples)
-    else:
-        sampled_points_indeces = np.arange(traj[0].shape[0])
+            sampled_points_indeces = np.arange(traj[0].shape[0])
+            
+    trajectory_data['sampled_point_indeces'] = sampled_points_indeces
 
-    edge_index, faces = compute_edges_index(traj[0][sampled_points_indeces], k=k, delaunay=delaunay, sim_data=sim_data, norm_threshold=norm_threshold)
-    # plot_mesh(traj[0][sampled_points_indeces], edge_index.T)
+    if edge_index is None:
+        edge_index, faces = compute_edges_index(traj[0][sampled_points_indeces], k=k, delaunay=delaunay, sim_data=sim_data, norm_threshold=norm_threshold)
+        # plot_mesh(traj[0][sampled_points_indeces], edge_index.T)
     
     offset = np.zeros(3)
     scale = 1
@@ -251,9 +304,9 @@ def process_traj(traj, dt, k=3, delaunay=False, subsample=False, num_samples=300
     #     scale = 2.2
     #     offset = traj[0][sampled_points_indeces].mean(0)*scale
 
-    for time_idx in range(1, traj.shape[0]):
+    for time_idx in range(1, max(traj.shape[0], 2)):
         # Position at current and previous timestep
-        pos_current = traj[time_idx][sampled_points_indeces]*scale - offset
+        pos_current = traj[min(time_idx,traj.shape[0]-1) ][sampled_points_indeces]*scale - offset
         pos_previous = traj[time_idx - 1][sampled_points_indeces]*scale - offset
 
         # Compute velocity
@@ -271,6 +324,7 @@ def process_traj(traj, dt, k=3, delaunay=False, subsample=False, num_samples=300
         # compute edge features
         displacement, norm = compute_edge_features(torch.tensor(pos_current, dtype=torch.float), edge_index)
         
+        
         # prunte edges at the first time step
         if time_idx == 1:
             if not sim_data:
@@ -279,7 +333,14 @@ def process_traj(traj, dt, k=3, delaunay=False, subsample=False, num_samples=300
             else:
                 
                 edge_index = edge_index[:,(norm < norm_threshold)[:, 0]]
+            if not sim_data:
+                # edge_index = edge_index[:,(norm < norm_threshold+0.12)[:, 0]]
+                edge_index = edge_index
+            else:
+                
+                edge_index = edge_index[:,(norm < norm_threshold)[:, 0]]
             displacement, norm = compute_edge_features(torch.tensor(pos_current, dtype=torch.float), edge_index)
+        
         
         trajectory_data["edge_index"].append(edge_index)
         trajectory_data["edge_displacement"].append(displacement)
@@ -287,13 +348,15 @@ def process_traj(traj, dt, k=3, delaunay=False, subsample=False, num_samples=300
         trajectory_data["edge_faces"].append(faces)
 
     # Handle the first position manually if needed (e.g., set initial velocity to zero)
-    trajectory_data["pos"].insert(0, traj[0][sampled_points_indeces])
-    trajectory_data["velocity"].insert(0, np.zeros_like(trajectory_data["velocity"][0]))  # Assuming initial velocity is zero
-    trajectory_data["node_type"].insert(0, trajectory_data["node_type"][0])
-    trajectory_data["edge_index"].insert(0, edge_index)
-    trajectory_data["edge_displacement"].insert(0, trajectory_data["edge_displacement"][0])
-    trajectory_data["edge_norm"].insert(0, trajectory_data["edge_norm"][0])
-    trajectory_data["edge_faces"].insert(0, trajectory_data["edge_faces"][0])
+    # the if condition is needed because if trak.shape[0] == 1, then traj[0] is already in the list, but not otherwise
+    if traj.shape[0] > 1:
+        trajectory_data["pos"].insert(0, traj[0][sampled_points_indeces])
+        trajectory_data["velocity"].insert(0, np.zeros_like(trajectory_data["velocity"][0]))  # Assuming initial velocity is zero
+        trajectory_data["node_type"].insert(0, trajectory_data["node_type"][0])
+        trajectory_data["edge_index"].insert(0, edge_index)
+        trajectory_data["edge_displacement"].insert(0, trajectory_data["edge_displacement"][0])
+        trajectory_data["edge_norm"].insert(0, trajectory_data["edge_norm"][0])
+        trajectory_data["edge_faces"].insert(0, trajectory_data["edge_faces"][0])
 
     # iterate over all keys to make it numpy array
     for key in trajectory_data.keys():

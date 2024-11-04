@@ -23,6 +23,13 @@ class SamplesClothDataset(torch.utils.data.Dataset):
         self._action_steps = FLAGS.action_steps
         self._future_sequence_length = FLAGS.future_sequence_length                
         self.sim_data = sim_data
+<<<<<<< HEAD
+=======
+        
+        # TODO: extend to multiple envs and eventually transfor it into dictionary for different labels (e.g. position, velocity, label)
+        self.load_keys=['pos', 'vel', 'actions', 'trajectory_params', 'gripper_pos', 'pick', 'place', 'grasped_particle']
+        self.load_keys=['pos', 'actions',  'gripper_pos', 'pick', 'place']
+>>>>>>> 9b63d7a (Commit minor changes)
 
         self._data = self.load_data(data_path)
         self.transform = transform

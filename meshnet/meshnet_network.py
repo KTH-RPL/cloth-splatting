@@ -6,7 +6,7 @@ import numpy as np
 import glob
 import re
 import os
-
+from meshnet.viz import plot_mesh, plot_pcd_list
 from meshnet.model_utils import Normalizer
 from meshnet.graph_network import EncodeProcessDecode
 
@@ -338,8 +338,16 @@ class ResidualMeshSimulator(torch.nn.Module):
             self.n_times = n_times
         else:
             self.n_times = self.mesh_predictions.shape[0]
+<<<<<<< HEAD
 
         self.time_delta = 1.0 / (self.n_times - 1)
+=======
+        
+        if self.n_times == 1:
+            self.time_delta = 1.0
+        else:
+            self.time_delta = 1.0 / (self.n_times - 1)
+>>>>>>> 9b63d7a (Commit minor changes)
 
         n_nodes = self.mesh_predictions.shape[1]
 
