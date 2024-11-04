@@ -1,14 +1,11 @@
-# MD-Splatting: Learning Metric Deformation from 4D Gaussians in Highly Deformable Scenes
+# Cloth-Splatting: 3D Cloth State Estimation from RGB Supervision
 
-## arXiv Preprint
 
 ### [Project Page](https://kth-rpl.github.io/cloth-splatting/)| [Paper](https://openreview.net/pdf?id=WmWbswjTsi)
 
 ---------------------------------------------------
 
----
-
-![block](assets/teaserfig.png)   
+![block](assets/method_v6.png)   
 
 
 ## Installation 
