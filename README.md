@@ -2,7 +2,7 @@
 
 ## arXiv Preprint
 
-### [Project Page](https://md-splatting.github.io/)| [arXiv Paper](https://arxiv.org/abs/2312.00583)
+### [Project Page](https://kth-rpl.github.io/cloth-splatting/)| [Paper](https://openreview.net/pdf?id=WmWbswjTsi)
 
 ---------------------------------------------------
 
