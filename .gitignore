@@ -22,11 +22,9 @@ manipulation/demos/
 results/
 sim_datasets/
 *.sh
-*.png 
 *.npz
 *.npy
 *.ipynb
-*.gif
 *.sif
 submodules/depth-diff-gaussian-rasterization
 submodules/simple-knn
@@ -40,3 +38,4 @@ manipulation/experiment_results/
 tmp/obj/00000.obj
 tmp_scene_render/
 cloth_splatting.egg-info/
+*.DS_Store

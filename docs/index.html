@@ -1,0 +1,346 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <meta name="description"
+        content="Cloth-Splatting: 3D Cloth State Estimation from RGB Supervision"        ">
+  <meta name="keywords" content="Robotics, Computer Vision, Machine Learning, 3D State Estimation, Gaussian Splatting, Vision-based Tracking, De-
+  formable Objects">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Cloth-Splatting: 3D Cloth State Estimation from RGB Supervision</title>
+
+  <script>
+    window.dataLayer = window.dataLayer || [];
+
+    function gtag() {
+      dataLayer.push(arguments);
+    }
+
+    gtag('js', new Date());
+    gtag('config', 'G-PYVRSFMDRL');
+  </script>
+
+  <link href="https://fonts.googleapis.com/css?family=Google+Sans|Noto+Sans|Castoro"
+        rel="stylesheet">
+
+  <link rel="stylesheet" href="./static/css/bulma.min.css">
+  <link rel="stylesheet" href="./static/css/bulma-carousel.min.css">
+  <link rel="stylesheet" href="./static/css/bulma-slider.min.css">
+  <link rel="stylesheet" href="./static/css/fontawesome.all.min.css">
+  <link rel="stylesheet"
+        href="https://cdn.jsdelivr.net/gh/jpswalsh/academicons@1/css/academicons.min.css">
+  <link rel="stylesheet" href="./static/css/index.css">
+
+  <script src="https://ajax.googleapis.com/ajax/libs/jquery/3.5.1/jquery.min.js"></script>
+  <script defer src="./static/js/fontawesome.all.min.js"></script>
+  <script src="./static/js/bulma-carousel.min.js"></script>
+  <script src="./static/js/bulma-slider.min.js"></script>
+  <!-- <script src="./static/js/index.js"></script> -->
+</head>
+<body>
+
+<section class="hero">
+  <div class="hero-body">
+    <div class="container is-max-desktop">
+      <div class="columns is-centered">
+        <div class="column has-text-centered">
+          <h1 class="title is-1 publication-title">Cloth-Splatting: 3D Cloth State Estimation from RGB Supervision</h1>
+          <div class="is-size-5 publication-authors">
+            <span class="author-block">
+              <a href="https://albilo17.github.io/">Alberta Longhini</a><sup>1</sup>,
+            </span>
+            <span class="author-block">
+              <a href="https://buesma.github.io/">Marcel Büsching</a><sup>1</sup>,
+            </span>
+            <span class="author-block">
+              <a href="https://www.bart-ai.com/">Bardienus P. Duisterhof </a><sup>2</sup>,
+            </span>
+            <span class="author-block">
+              <a href="http://jenslundell.ai/">Jens Lundell</a><sup>1</sup>,
+            </span>
+            </br>
+            <span class="author-block">
+              <a href="https://ichnow.ski/">Jeffrey Ichnowski</a><sup>2</sup>,
+            </span>
+            <span class="author-block">
+              <a href="https://www.kth.se/profile/celle">Mårten Björkman</a><sup>1</sup>,
+            </span>
+            <span class="author-block">
+              <a href="https://www.kth.se/profile/dani">Danica Kragic</a><sup>1</sup>
+            </span>
+
+          </div>
+
+          <div class="is-size-5 publication-authors">
+            <span class="author-block"><sup>1</sup>KTH Royal Institute of Technology &nbsp; </span>
+            <span class="author-block"><sup>2</sup>Carnegie Mellon University &nbsp; </span>
+          </div>
+
+          <h1 style="font-size:24px;font-weight:bold">
+            Accepted to <a href="https:/corl.org">CoRL 2024</a></h1>
+          
+          <div class="column has-text-centered">
+            <div class="publication-links">
+              <!-- PDF Link. -->
+              <span class="link-block">
+                <a href="https://openreview.net/forum?id=WmWbswjTsi"
+                   class="external-link button is-normal is-rounded is-dark">
+                  <span class="icon">
+                      <i class="fas fa-file-pdf"></i>
+                  </span>
+                  <span>Paper</span>
+                </a>
+              </span>
+              <!-- <span class="link-block">
+                <a href="ADD ME"
+                   class="external-link button is-normal is-rounded is-dark">
+                  <span class="icon">
+                      <i class="ai ai-arxiv"></i>
+                  </span>
+                  <span>arXiv (soon)</span>
+                </a>
+              </span> -->
+              <!-- Video Link. -->
+              <!-- <span class="link-block">
+                <a href="ADD ME"
+                   class="external-link button is-normal is-rounded is-dark">
+                  <span class="icon">
+                      <i class="fab fa-youtube"></i>
+                  </span>
+                  <span>Video</span>
+                </a>
+              </span> -->
+              <!-- Code Link. -->
+              <span class="link-block">
+                <a href="https://github.com/KTH-RPL/cloth-splatting"
+                   class="external-link button is-normal is-rounded is-dark">
+                  <span class="icon">
+                      <i class="fab fa-github"></i>
+                  </span>
+                  <span>Code</span>
+                  </a>
+              </span>
+              <!-- Dataset Link. -->
+              <!-- <span class="link-block">
+                <a href="ADD ME"
+                   class="external-link button is-normal is-rounded is-dark">
+                  <span class="icon">
+                      <i class="far fa-images"></i>
+                  </span>
+                  <span>Data</span>
+                  </a>
+              </span> -->
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+<!-- <section class="hero teaser">
+  <div class="container is-max-desktop">
+    <div class="hero-body">
+      <image src="static/images/real-world-update.png" />
+      <h2 class="has-text-centered">
+      blah blah  
+      </h2>
+    </div>
+  </div>
+</section> -->
+
+<section class="section">
+  <div class="container is-max-desktop">
+    <!-- Abstract. -->
+    <div class="columns is-centered has-text-centered">
+      <div class="column is-four-fifths">
+        <h2 class="title is-3">Abstract</h2>
+        <div class="content has-text-justified">
+          We introduce Cloth-Splatting, a method for estimating 3D states of cloth from RGB images through a prediction-update framework. Cloth-Splatting leverages an action-conditioned dynamics model for predicting future states and uses 3D Gaussian Splatting to update the predicted states. Our key insight is that coupling a 3D mesh-based representation with Gaussian Splatting allows us to define a differentiable map between the cloth's state space and the image space. This enables the use of gradient-based optimization techniques to refine inaccurate state estimates using only RGB supervision. Our experiments demonstrate that Cloth-Splatting not only improves state estimation accuracy over current baselines but also reduces convergence time by ~85%.
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section class="section">
+  <div class="container is-max-desktop">
+    <!-- Abstract. -->
+    <div class="columns is-centered has-text-centered">
+      <div class="column is-four-fifths">
+        <h2 class="title is-3">Cloth Representation</h2>
+        <image src="static/images/mesh-representation.png" />
+        <div class="content has-text-justified">
+          Our representation uses a triangular mesh to capture geometry, with 3D Gaussians placed on the mesh faces to model visual appearance. Each Gaussian's position is defined relative to the mesh vertices. By applying 3D Gaussian Splatting (GS) for image rendering, we establish a differentiable mapping between the cloth's state space and the observation space.
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section class="section">
+  <div class="container is-max-desktop">
+    <!-- Abstract. -->
+    <div class="columns is-centered has-text-centered">
+      <div class="column is-four-fifths">
+        <h2 class="title is-3">State Estimation</h2>
+        <image src="static/images/pred-update.png" />
+        <div class="content has-text-justified">
+          Given the mesh representation, we can address the problem of estimating the 3D state of the cloth using a prediction-update framework akin to Bayesian filtering.
+          Starting with a previous state estimate and a known robotic action, Cloth-Splatting predicts the next state using a learned dynamics model of the cloth (GNN). 
+          Leveraging the rendering loss provided by GS, the state estimate is then iteratively updated using gradient-based optimization of the GS rendering loss.
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section class="section">
+  <div class="container is-max-desktop">
+    <h2 class="title is-3 is-centered has-text-centered">Tracking</h2>
+    <div class="grid is-col-min-18">
+      <div class="cell">
+        <video controls autoplay muted loop id="vid_towel_0_0">
+          <source src="static/videos/TOWEL_RW_0_0_rgb.mp4" type="video/mp4">
+        </video>
+      </div>
+      <div class="cell">
+        <video controls autoplay muted loop id="vid_towel_1_2">
+          <source src="static/videos/TOWEL_RW_1_2_rgb.mp4" type="video/mp4">
+        </video>
+      </div>
+      <div class="cell">
+        <video controls autoplay muted loop id="vid_towel_2_1">
+          <source src="static/videos/TOWEL_RW_2_1_rgb.mp4" type="video/mp4">
+        </video>
+      </div>
+      <div class="cell">
+        <video controls autoplay muted loop id="vid_towel_1_0">
+          <source src="static/videos/TOWEL_RW_1_0_rgb.mp4" type="video/mp4">
+        </video>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section class="section">
+  <div class="container is-max-desktop">
+    <!-- Abstract. -->
+    <div class="is-centered has-text-centered">
+      <h2 class="title is-3">Estimated Mesh</h2>
+      <div class="hero-body">
+        <image src="static/images/real-world-update.png" />
+        <div class="content has-text-justified">
+        Left, yellow: GNN prediction for time t. Right, green: Updated mesh.
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+
+<section class="section">
+  <div class="container is-max-desktop">
+    <h2 class="title is-3 is-centered has-text-centered">Manipulation</h2>
+    <div class="content has-text-justified">
+      We show a proof of concept of using Cloth-Splatting in a manipulation pipeline.
+      For this, we use the pre-trained GNN as dynamics model, MPC for planning of the robotic actions, and Cloth-Splatting for updating the state estimate after each action.
+      We compare our method (MPC-CS) against the following baselines: a FIXED trajectory, an open-loop (MPC-OL) baseline that plans the best actions in an open-loop fashion, and an oracle baseline that has access to the ground truth state of the cloth at each time step (OL-ORACLE).
+    </div>
+    <div class="grid is-col-min-18">
+      <div class="cell">
+        <h5 class="title is-5">FIXED</h5>
+        <image src="static/images/manipulation/FIXED.gif" />
+      </div>
+      <div class="cell">
+        <h5 class="title is-5">MPC-OL</h5>
+        <image src="static/images/manipulation/MPC_OL.gif" />
+      </div>
+      <div class="cell">
+        <h5 class="title is-5">MPC-CS (Traj. 1)</h5>
+        <image src="static/images/manipulation/MPC_CS_traj1.gif" />
+      </div>
+      <div class="cell">
+        <h5 class="title is-5">MPC-CS (Traj. 2)</h5>
+        <image src="static/images/manipulation/MPC_CS_traj2.gif" />
+      </div>
+      
+      </div>
+    </div>
+  </div>
+
+</section>
+
+
+
+<script>
+  window.onload = function() {
+    document.getElementById('vid_towel_0_0').playbackRate = 0.75
+    document.getElementById('vid_towel_1_2').playbackRate = 0.75
+    document.getElementById('vid_towel_2_1').playbackRate = 0.75
+    document.getElementById('vid_towel_1_0').playbackRate = 0.75
+
+  }
+</script>
+
+<section class="section">
+  <div class="container is-max-desktop">
+    <h2 class="title is-3 is-centered has-text-centered">Additional Video Results</h2>
+    <p align="center">
+      <iframe src="https://drive.google.com/file/d/194LJDAC_RlPBDQK8gixUJXhYivPSS8V5/preview" width="720" height="480" allow="autoplay"></iframe>
+    </p>
+    </div>
+  </div>
+</section>
+
+
+<section class="section" id="BibTeX">
+  <div class="container is-max-desktop content">
+    <h2 class="title">BibTeX</h2>
+    <pre><code>@inproceedings{
+  longhini2024clothsplatting,
+  title={Cloth-Splatting: 3D State Estimation from {RGB} Supervision for Deformable Objects},
+  author={Alberta Longhini and Marcel B{\"u}sching and Bardienus Pieter Duisterhof and Jens Lundell and Jeffrey Ichnowski and M{\r{a}}rten Bj{\"o}rkman and Danica Kragic},
+  booktitle={8th Annual Conference on Robot Learning},
+  year={2024},
+  url={https://openreview.net/forum?id=WmWbswjTsi}
+}</code></pre>
+  </div>
+</section>
+
+<section class="section">
+  <div class="container is-max-desktop">
+    <!-- Abstract. -->
+      <div class="is-centered has-text-centered is-four-fifths">
+        <h2 class="title is-3">Acknowledgments</h2>
+        <div class="content has-text-justified">
+          This work was supported by the Swedish Research Council; the Wallenberg Artificial Intelligence, Autonomous Systems and Software Program (WASP) funded by Knut and Alice Wallenberg Foundation; the European Research  Council (ERC-884807); and the Center for Machine Learning and Health (CMLH). The computations were enabled by the the Pittsburgh Supercomputing Center and by the Berzelius resource provided by the Knut and Alice Wallenberg Foundation at the Swedish National Supercomputer Centre.
+        </div>
+    </div>
+    <!--/ Abstract. -->
+    <!-- Paper video. -->
+    <!--/<div class="columns is-centered has-text-centered">
+      <div class="column is-four-fifths">
+        <h2 class="title is-3">Video</h2>
+        <div class="publication-video">
+          <iframe width="560" height="315" src="ADD ME" title="YouTube video player" frameborder="0" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share" allowfullscreen></iframe>
+        </div>
+      </div>
+    </div> -->
+    <!-- <video controls>
+      <source src="SuppVideo.mp4" type="video/mp4">
+    </video> -->
+    <!--/ Paper video. -->
+  </div>
+</section>
+
+
+
+<footer class="footer">
+  <div class="container is-centered has-text-centered">
+      <div class="content">
+        This website is borrowed from <a href="https://github.com/3d-moments/3d-moments.github.io">3D Moments</a> and <a href="https://github.com/nerfies/nerfies.github.io">Nerfies</a>.
+      </div>
+</footer>
+
+</body>
+</html>
