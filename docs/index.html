@@ -157,6 +157,12 @@
         <div class="content has-text-justified">
           We introduce Cloth-Splatting, a method for estimating 3D states of cloth from RGB images through a prediction-update framework. Cloth-Splatting leverages an action-conditioned dynamics model for predicting future states and uses 3D Gaussian Splatting to update the predicted states. Our key insight is that coupling a 3D mesh-based representation with Gaussian Splatting allows us to define a differentiable map between the cloth's state space and the image space. This enables the use of gradient-based optimization techniques to refine inaccurate state estimates using only RGB supervision. Our experiments demonstrate that Cloth-Splatting not only improves state estimation accuracy over current baselines but also reduces convergence time by ~85%.
         </div>
+        <div class="hero-body">
+        <image src="static/images/real-world-update.png" />
+        <div class="content has-text-centered">
+        Left, yellow: GNN prediction of the mesh for time t. Right, green: Updated mesh.
+        </div>
+      </div>
       </div>
     </div>
   </div>
@@ -168,10 +174,10 @@
     <div class="columns is-centered has-text-centered">
       <div class="column is-four-fifths">
         <h2 class="title is-3">Cloth Representation</h2>
-        <image src="static/images/mesh-representation.png" />
         <div class="content has-text-justified">
           Our representation uses a triangular mesh to capture geometry, with 3D Gaussians placed on the mesh faces to model visual appearance. Each Gaussian's position is defined relative to the mesh vertices. By applying 3D Gaussian Splatting (GS) for image rendering, we establish a differentiable mapping between the cloth's state space and the observation space.
         </div>
+        <image src="static/images/mesh-representation.png" />
       </div>
     </div>
   </div>
@@ -183,12 +189,12 @@
     <div class="columns is-centered has-text-centered">
       <div class="column is-four-fifths">
         <h2 class="title is-3">State Estimation</h2>
-        <image src="static/images/pred-update.png" />
         <div class="content has-text-justified">
           Given the mesh representation, we can address the problem of estimating the 3D state of the cloth using a prediction-update framework akin to Bayesian filtering.
-          Starting with a previous state estimate and a known robotic action, Cloth-Splatting predicts the next state using a learned dynamics model of the cloth (GNN). 
+          Starting with a previous state estimate and a known robotic action, Cloth-Splatting predicts the next state using a learned dynamics model of the cloth (GNN).
           Leveraging the rendering loss provided by GS, the state estimate is then iteratively updated using gradient-based optimization of the GS rendering loss.
         </div>
+        <image src="static/images/pred-update.png" />
       </div>
     </div>
   </div>
@@ -217,21 +223,6 @@
         <video controls autoplay muted loop id="vid_towel_1_0">
           <source src="static/videos/TOWEL_RW_1_0_rgb.mp4" type="video/mp4">
         </video>
-      </div>
-    </div>
-  </div>
-</section>
-
-<section class="section">
-  <div class="container is-max-desktop">
-    <!-- Abstract. -->
-    <div class="is-centered has-text-centered">
-      <h2 class="title is-3">Estimated Mesh</h2>
-      <div class="hero-body">
-        <image src="static/images/real-world-update.png" />
-        <div class="content has-text-justified">
-        Left, yellow: GNN prediction for time t. Right, green: Updated mesh.
-        </div>
       </div>
     </div>
   </div>
