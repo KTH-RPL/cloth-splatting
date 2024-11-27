@@ -1,0 +1,41 @@
+cff-version: 1.2.0
+authors:
+  - family-names: Longhini
+    given-names: Alberta
+  - family-names: Büsching
+    given-names: Marcel
+  - family-names: Bardienus
+    given-names: Pieter Duisterhof
+  - family-names: Lundell
+    given-names: Jens
+  - family-names: Ichnowski
+    given-names: Jeffrey
+  - family-names: Björkman
+    given-names: Mårten
+  - family-names: Kragic
+    given-names: Danica
+title: "Cloth-Splatting: 3D Cloth State Estimation from RGB Supervision"
+version: 1.0.0
+url: "https://openreview.net/forum?id=WmWbswjTsi"
+date-released: '2024-11-27'
+preferred-citation:
+  authors:
+    - family-names: Longhini
+      given-names: Alberta
+    - family-names: Büsching
+      given-names: Marcel
+    - family-names: Bardienus
+      given-names: Pieter Duisterhof
+    - family-names: Lundell
+      given-names: Jens
+    - family-names: Ichnowski
+      given-names: Jeffrey
+    - family-names: Björkman
+      given-names: Mårten
+    - family-names: Kragic
+      given-names: Danica
+  title: "Cloth-Splatting: 3D Cloth State Estimation from RGB Supervision"
+  url: "https://openreview.net/forum?id=WmWbswjTsi"
+  type: conference-paper
+  year: 2024
+  booktitle: "8th Annual Conference on Robot Learning"
