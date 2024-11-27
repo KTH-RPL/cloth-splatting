@@ -15,7 +15,7 @@ do
       python3 -s data/folding_scenes/SHORTS_01_01 --expname "residual_simulation/SHORTS_01_01"\
        --configs arguments/cloth_splatting/default.py --view_skip 3\
         --lambda_ssim $LAMBDA_SSIM --lambda_rigid $LAMBDA_RIGID --lambda_deform_magn $LAMBDA_DEFORM_MAGN --iteration 6000
-      python3 render_experimental.py -s "data/${SCENE_TYPE}/${SCENE}" \
+      python3 render.py -s "data/${SCENE_TYPE}/${SCENE}" \
         --model_path "output/${EXP_DIR}" \
         --configs "arguments/cloth_splatting/default.py" \
         --meshnet_path "output/${EXP_DIR}/meshnet"\

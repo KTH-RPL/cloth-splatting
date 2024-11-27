@@ -10,7 +10,7 @@ python3 train.py -s "data/${SCENE_TYPE}/${SCENE}" --port ${port} --expname "resi
 for ITER in 1500 1575 1625 1750 1875 2000 2500 3000 4000 5000 6000;
 do
     echo ${ITER} >> "output/residual_simulation/${SCENE}/align_eval.txt"
-    python3 render_experimental.py -s "data/${SCENE_TYPE}/${SCENE}" \
+    python3 render.py -s "data/${SCENE_TYPE}/${SCENE}" \
       --model_path "output/residual_simulation/${SCENE}" \
       --configs "arguments/cloth_splatting/default.py" \
       --meshnet_path "output/residual_simulation/${SCENE}/meshnet"\
