@@ -38,4 +38,4 @@ preferred-citation:
   url: "https://openreview.net/forum?id=WmWbswjTsi"
   type: conference-paper
   year: 2024
-  booktitle: "8th Annual Conference on Robot Learning"
+  conference: "8th Annual Conference on Robot Learning"

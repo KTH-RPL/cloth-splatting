@@ -82,12 +82,12 @@ Some source code of ours is borrowed from [3DGS](https://github.com/graphdeco-i
 
 ## Citation
 ```
-@misc{duisterhof2023mdsplatting,
-      title={MD-Splatting: Learning Metric Deformation from 4D Gaussians in Highly Deformable Scenes}, 
-      author={Bardienus P. Duisterhof and Zhao Mandi and Yunchao Yao and Jia-Wei Liu and Mike Zheng Shou and Shuran Song and Jeffrey Ichnowski},
-      year={2023},
-      eprint={2312.00583},
-      archivePrefix={arXiv},
-      primaryClass={cs.CV}
+@inproceedings{
+  longhini2024clothsplatting,
+  title={Cloth-Splatting: 3D State Estimation from {RGB} Supervision for Deformable Objects},
+  author={Alberta Longhini and Marcel B{\"u}sching and Bardienus Pieter Duisterhof and Jens Lundell and Jeffrey Ichnowski and M{\r{a}}rten Bj{\"o}rkman and Danica Kragic},
+  booktitle={8th Annual Conference on Robot Learning},
+  year={2024},
+  url={https://openreview.net/forum?id=WmWbswjTsi}
 }
 ```
